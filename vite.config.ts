@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
-      base: '/optimus-ai-and-robotics/',
+      // Use a production base for GitHub Pages, but keep root for dev
+      base: mode === 'production' ? '/optimus-ai-and-robotics/' : '/',
       server: {
         port: 3000,
         host: '0.0.0.0',
