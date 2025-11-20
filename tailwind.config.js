@@ -6,13 +6,7 @@ export default {
     './**/*.{ts,tsx}',
   ],
   theme: {
-    extend: {
-      colors: {
-        primary: '#d32f2f',
-        'primary-dark': '#b71c1c',
-        'primary-light': '#f44336',
-      },
-    },
+    extend: {},
   },
   plugins: [],
 }
