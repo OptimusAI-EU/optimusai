@@ -1,82 +1,88 @@
-const mongoose = require('mongoose');
+const { DataTypes, Model } = require('sequelize');
 
-const subscriptionSchema = new mongoose.Schema(
-  {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    planName: {
-      type: String,
-      enum: ['free', 'starter', 'professional', 'enterprise'],
-      required: true,
-    },
-    type: {
-      type: String,
-      enum: ['RAAS', 'SAAS', 'education', 'health', 'custom'],
-      required: true,
-    },
-    billingCycle: {
-      type: String,
-      enum: ['monthly', 'annual'],
-      default: 'monthly',
-    },
-    price: {
-      type: Number,
-      required: true,
-    },
-    startDate: {
-      type: Date,
-      default: Date.now,
-    },
-    endDate: {
-      type: Date,
-      required: true,
-    },
-    renewalDate: {
-      type: Date,
-      required: true,
-    },
-    autoRenew: {
-      type: Boolean,
-      default: true,
-    },
-    status: {
-      type: String,
-      enum: ['active', 'cancelled', 'expired', 'paused'],
-      default: 'active',
-    },
-    features: [String],
-    usageStats: {
-      requestsUsed: {
-        type: Number,
-        default: 0,
-      },
-      requestsLimit: {
-        type: Number,
-        required: true,
-      },
-      storageUsed: {
-        type: Number,
-        default: 0,
-      },
-      storageLimit: {
-        type: Number,
-        required: true,
-      },
-    },
-    paymentMethod: {
-      type: String,
-      enum: ['credit_card', 'bank_transfer', 'paypal'],
-    },
-    stripeSubscriptionId: String,
-    cancelledAt: Date,
-    cancelReason: String,
-  },
-  {
-    timestamps: true,
-  }
-);
+module.exports = (sequelize) => {
+  class Subscription extends Model {}
 
-module.exports = mongoose.model('Subscription', subscriptionSchema);
+  Subscription.init(
+    {
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
+      },
+      userId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'Users', key: 'id' },
+      },
+      planName: {
+        type: DataTypes.ENUM('free', 'starter', 'professional', 'enterprise'),
+        allowNull: false,
+      },
+      type: {
+        type: DataTypes.ENUM('RAAS', 'SAAS', 'education', 'health', 'custom'),
+        allowNull: false,
+      },
+      billingCycle: {
+        type: DataTypes.ENUM('monthly', 'annual'),
+        defaultValue: 'monthly',
+      },
+      price: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+      },
+      startDate: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
+      },
+      endDate: {
+        type: DataTypes.DATE,
+        allowNull: false,
+      },
+      renewalDate: {
+        type: DataTypes.DATE,
+        allowNull: false,
+      },
+      autoRenew: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+      },
+      status: {
+        type: DataTypes.ENUM('active', 'cancelled', 'expired', 'paused'),
+        defaultValue: 'active',
+      },
+      features: {
+        type: DataTypes.JSON,
+        defaultValue: [],
+      },
+      usageStats: {
+        type: DataTypes.JSON,
+        defaultValue: {
+          requestsUsed: 0,
+          requestsLimit: 0,
+          storageUsed: 0,
+          storageLimit: 0,
+        },
+      },
+      paymentMethod: {
+        type: DataTypes.ENUM('credit_card', 'bank_transfer', 'paypal'),
+      },
+      stripeSubscriptionId: {
+        type: DataTypes.STRING,
+      },
+      cancelledAt: {
+        type: DataTypes.DATE,
+      },
+      cancelReason: {
+        type: DataTypes.STRING,
+      },
+    },
+    {
+      sequelize,
+      modelName: 'Subscription',
+      timestamps: true,
+    }
+  );
+
+  return Subscription;
+};

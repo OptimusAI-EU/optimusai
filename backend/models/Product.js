@@ -1,52 +1,61 @@
-const mongoose = require('mongoose');
+const { DataTypes, Model } = require('sequelize');
 
-const productSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    description: {
-      type: String,
-      required: true,
-    },
-    price: {
-      type: Number,
-      required: true,
-    },
-    category: {
-      type: String,
-      enum: ['robot', 'service', 'license', 'consulting'],
-      required: true,
-    },
-    stock: {
-      type: Number,
-      default: 0,
-    },
-    images: [String],
-    specifications: mongoose.Schema.Types.Mixed,
-    features: [String],
-    rating: {
-      average: {
-        type: Number,
-        min: 0,
-        max: 5,
-        default: 0,
-      },
-      count: {
-        type: Number,
-        default: 0,
-      },
-    },
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
-  },
-  {
-    timestamps: true,
-  }
-);
+module.exports = (sequelize) => {
+  class Product extends Model {}
 
-module.exports = mongoose.model('Product', productSchema);
+  Product.init(
+    {
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
+      },
+      name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      description: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+      },
+      price: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+      },
+      category: {
+        type: DataTypes.ENUM('RAAS', 'SAAS', 'education', 'health', 'custom'),
+        allowNull: false,
+      },
+      stock: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
+      },
+      images: {
+        type: DataTypes.JSON,
+        defaultValue: [],
+      },
+      specifications: {
+        type: DataTypes.JSON,
+      },
+      features: {
+        type: DataTypes.JSON,
+        defaultValue: [],
+      },
+      rating: {
+        type: DataTypes.JSON,
+        defaultValue: { average: 0, count: 0 },
+      },
+      isActive: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+      },
+    },
+    {
+      sequelize,
+      modelName: 'Product',
+      timestamps: true,
+    }
+  );
+
+  return Product;
+};

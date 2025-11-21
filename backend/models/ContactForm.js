@@ -1,78 +1,74 @@
-const mongoose = require('mongoose');
+const { DataTypes, Model } = require('sequelize');
 
-const contactFormSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    email: {
-      type: String,
-      required: true,
-      lowercase: true,
-      trim: true,
-    },
-    phone: {
-      type: String,
-      default: null,
-    },
-    subject: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    message: {
-      type: String,
-      required: true,
-    },
-    category: {
-      type: String,
-      enum: ['general', 'support', 'sales', 'partnership', 'bug_report'],
-      default: 'general',
-    },
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-    },
-    status: {
-      type: String,
-      enum: ['new', 'in_progress', 'resolved', 'closed'],
-      default: 'new',
-    },
-    priority: {
-      type: String,
-      enum: ['low', 'medium', 'high', 'urgent'],
-      default: 'medium',
-    },
-    attachments: [String],
-    assignedTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-    },
-    responses: [
-      {
-        respondentId: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'User',
-        },
-        message: String,
-        timestamp: {
-          type: Date,
-          default: Date.now,
-        },
+module.exports = (sequelize) => {
+  class ContactForm extends Model {}
+
+  ContactForm.init(
+    {
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
       },
-    ],
-    isRead: {
-      type: Boolean,
-      default: false,
+      name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      email: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        validate: { isEmail: true },
+      },
+      phone: {
+        type: DataTypes.STRING,
+      },
+      subject: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      message: {
+        type: DataTypes.TEXT,
+        allowNull: false,
+      },
+      category: {
+        type: DataTypes.ENUM('general', 'support', 'sales', 'partnership'),
+        defaultValue: 'general',
+      },
+      status: {
+        type: DataTypes.ENUM('new', 'in_progress', 'resolved', 'closed'),
+        defaultValue: 'new',
+      },
+      priority: {
+        type: DataTypes.ENUM('low', 'medium', 'high', 'urgent'),
+        defaultValue: 'medium',
+      },
+      attachments: {
+        type: DataTypes.JSON,
+        defaultValue: [],
+      },
+      responses: {
+        type: DataTypes.JSON,
+        defaultValue: [],
+      },
+      isRead: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      userId: {
+        type: DataTypes.INTEGER,
+        references: { model: 'Users', key: 'id' },
+      },
+      assignedTo: {
+        type: DataTypes.INTEGER,
+        references: { model: 'Users', key: 'id' },
+      },
     },
-  },
-  {
-    timestamps: true,
-  }
-);
+    {
+      sequelize,
+      modelName: 'ContactForm',
+      timestamps: true,
+    }
+  );
 
-module.exports = mongoose.model('ContactForm', contactFormSchema);
+  return ContactForm;
+};

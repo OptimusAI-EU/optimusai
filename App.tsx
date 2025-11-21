@@ -7,6 +7,7 @@ import About from './pages/About';
 import Odin from './pages/Odin';
 import Robotics from './pages/Robotics';
 import Contact from './pages/Contact';
+import Humanoid from './pages/Humanoid';
 
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<Page>('About');
@@ -25,6 +26,8 @@ const App: React.FC = () => {
         return <Robotics />;
       case 'Contact':
         return <Contact />;
+      case 'Humanoid':
+        return <Humanoid />;
       default:
         return <About />;
     }

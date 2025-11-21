@@ -1,135 +1,126 @@
-const mongoose = require('mongoose');
+const { DataTypes, Model } = require('sequelize');
 const bcrypt = require('bcryptjs');
 
-const userSchema = new mongoose.Schema(
-  {
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
-    password: {
-      type: String,
-      select: false,
-    },
-    firstName: {
-      type: String,
-      required: true,
-    },
-    lastName: {
-      type: String,
-      required: true,
-    },
-    profileImage: {
-      type: String,
-      default: null,
-    },
-    phone: {
-      type: String,
-      default: null,
-    },
-    company: {
-      type: String,
-      default: null,
-    },
-    role: {
-      type: String,
-      enum: ['user', 'admin', 'moderator'],
-      default: 'user',
-    },
-    subscriptionPlan: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Subscription',
-      default: null,
-    },
-    subscriptionStatus: {
-      type: String,
-      enum: ['active', 'inactive', 'cancelled', 'paused'],
-      default: 'inactive',
-    },
-    subscriptionStartDate: {
-      type: Date,
-      default: null,
-    },
-    subscriptionEndDate: {
-      type: Date,
-      default: null,
-    },
-    billingAddress: {
-      street: String,
-      city: String,
-      state: String,
-      zipCode: String,
-      country: String,
-    },
-    shippingAddress: {
-      street: String,
-      city: String,
-      state: String,
-      zipCode: String,
-      country: String,
-    },
-    oauth: {
-      googleId: String,
-      githubId: String,
-      googleProfile: mongoose.Schema.Types.Mixed,
-      githubProfile: mongoose.Schema.Types.Mixed,
-    },
-    isEmailVerified: {
-      type: Boolean,
-      default: false,
-    },
-    emailVerificationToken: String,
-    emailVerificationExpires: Date,
-    passwordResetToken: String,
-    passwordResetExpires: Date,
-    loginHistory: [
-      {
-        timestamp: {
-          type: Date,
-          default: Date.now,
-        },
-        ipAddress: String,
-        userAgent: String,
+module.exports = (sequelize) => {
+  class User extends Model {
+    async comparePassword(candidatePassword) {
+      return bcrypt.compare(candidatePassword, this.password);
+    }
+
+    getPublicProfile() {
+      const userObject = this.toJSON();
+      delete userObject.password;
+      if (userObject.oauth) {
+        delete userObject.oauth.googleProfile;
+        delete userObject.oauth.githubProfile;
+      }
+      return userObject;
+    }
+  }
+
+  User.init(
+    {
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
       },
-    ],
-    isActive: {
-      type: Boolean,
-      default: true,
+      email: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true,
+        lowercase: true,
+        validate: { isEmail: true },
+      },
+      password: {
+        type: DataTypes.STRING,
+      },
+      firstName: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      lastName: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      profileImage: {
+        type: DataTypes.STRING,
+      },
+      phone: {
+        type: DataTypes.STRING,
+      },
+      company: {
+        type: DataTypes.STRING,
+      },
+      role: {
+        type: DataTypes.ENUM('user', 'admin', 'moderator'),
+        defaultValue: 'user',
+      },
+      subscriptionStatus: {
+        type: DataTypes.ENUM('active', 'inactive', 'cancelled', 'paused'),
+        defaultValue: 'inactive',
+      },
+      subscriptionStartDate: {
+        type: DataTypes.DATE,
+      },
+      subscriptionEndDate: {
+        type: DataTypes.DATE,
+      },
+      billingAddress: {
+        type: DataTypes.JSON,
+      },
+      shippingAddress: {
+        type: DataTypes.JSON,
+      },
+      oauth: {
+        type: DataTypes.JSON,
+      },
+      isEmailVerified: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      emailVerificationToken: {
+        type: DataTypes.STRING,
+      },
+      emailVerificationExpires: {
+        type: DataTypes.DATE,
+      },
+      passwordResetToken: {
+        type: DataTypes.STRING,
+      },
+      passwordResetExpires: {
+        type: DataTypes.DATE,
+      },
+      loginHistory: {
+        type: DataTypes.JSON,
+        defaultValue: [],
+      },
+      isActive: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+      },
     },
-  },
-  {
-    timestamps: true,
-  }
-);
+    {
+      sequelize,
+      modelName: 'User',
+      timestamps: true,
+    }
+  );
 
-// Hash password before saving
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+  // Hash password before saving
+  User.beforeCreate(async (user) => {
+    if (user.password) {
+      const salt = await bcrypt.genSalt(10);
+      user.password = await bcrypt.hash(user.password, salt);
+    }
+  });
 
-  try {
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
+  User.beforeUpdate(async (user) => {
+    if (user.changed('password')) {
+      const salt = await bcrypt.genSalt(10);
+      user.password = await bcrypt.hash(user.password, salt);
+    }
+  });
 
-// Method to compare passwords
-userSchema.methods.comparePassword = async function (candidatePassword) {
-  return await bcrypt.compare(candidatePassword, this.password);
+  return User;
 };
-
-// Method to get public profile
-userSchema.methods.getPublicProfile = function () {
-  const userObject = this.toObject();
-  delete userObject.password;
-  delete userObject.oauth.googleProfile;
-  delete userObject.oauth.githubProfile;
-  return userObject;
-};
-
-module.exports = mongoose.model('User', userSchema);

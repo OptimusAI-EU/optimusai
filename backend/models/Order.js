@@ -1,96 +1,92 @@
-const mongoose = require('mongoose');
+const { DataTypes, Model } = require('sequelize');
 
-const orderSchema = new mongoose.Schema(
-  {
-    orderNumber: {
-      type: String,
-      unique: true,
-      required: true,
-    },
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    items: [
-      {
-        productId: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Product',
-        },
-        productName: String,
-        quantity: Number,
-        unitPrice: Number,
-        totalPrice: Number,
+module.exports = (sequelize) => {
+  class Order extends Model {}
+
+  Order.init(
+    {
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
       },
-    ],
-    subtotal: {
-      type: Number,
-      required: true,
+      orderNumber: {
+        type: DataTypes.STRING,
+        unique: true,
+        allowNull: false,
+      },
+      userId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'Users', key: 'id' },
+      },
+      items: {
+        type: DataTypes.JSON,
+        defaultValue: [],
+      },
+      subtotal: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+      },
+      shipping: {
+        type: DataTypes.DECIMAL(10, 2),
+        defaultValue: 0,
+      },
+      tax: {
+        type: DataTypes.DECIMAL(10, 2),
+        defaultValue: 0,
+      },
+      total: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+      },
+      shippingAddress: {
+        type: DataTypes.JSON,
+      },
+      billingAddress: {
+        type: DataTypes.JSON,
+      },
+      paymentMethod: {
+        type: DataTypes.ENUM('credit_card', 'paypal', 'bank_transfer'),
+        allowNull: false,
+      },
+      paymentStatus: {
+        type: DataTypes.ENUM('pending', 'completed', 'failed', 'refunded'),
+        defaultValue: 'pending',
+      },
+      orderStatus: {
+        type: DataTypes.ENUM('pending', 'processing', 'shipped', 'delivered', 'cancelled'),
+        defaultValue: 'pending',
+      },
+      stripePaymentIntentId: {
+        type: DataTypes.STRING,
+      },
+      trackingNumber: {
+        type: DataTypes.STRING,
+      },
+      notes: {
+        type: DataTypes.TEXT,
+      },
+      cancelledAt: {
+        type: DataTypes.DATE,
+      },
+      cancelReason: {
+        type: DataTypes.STRING,
+      },
     },
-    shipping: {
-      type: Number,
-      default: 0,
-    },
-    tax: {
-      type: Number,
-      default: 0,
-    },
-    total: {
-      type: Number,
-      required: true,
-    },
-    shippingAddress: {
-      fullName: String,
-      street: String,
-      city: String,
-      state: String,
-      zipCode: String,
-      country: String,
-      phone: String,
-    },
-    billingAddress: {
-      fullName: String,
-      street: String,
-      city: String,
-      state: String,
-      zipCode: String,
-      country: String,
-      phone: String,
-    },
-    paymentMethod: {
-      type: String,
-      enum: ['credit_card', 'paypal', 'bank_transfer'],
-      required: true,
-    },
-    paymentStatus: {
-      type: String,
-      enum: ['pending', 'completed', 'failed', 'refunded'],
-      default: 'pending',
-    },
-    orderStatus: {
-      type: String,
-      enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled'],
-      default: 'pending',
-    },
-    stripePaymentIntentId: String,
-    trackingNumber: String,
-    notes: String,
-    cancelledAt: Date,
-    cancelReason: String,
-  },
-  {
-    timestamps: true,
-  }
-);
+    {
+      sequelize,
+      modelName: 'Order',
+      timestamps: true,
+    }
+  );
 
-// Auto-generate order number
-orderSchema.pre('save', async function (next) {
-  if (!this.orderNumber) {
-    const count = await this.constructor.countDocuments();
-    this.orderNumber = `ORD-${Date.now()}-${count + 1}`;
-  }
-  next();
-});
+  // Auto-generate order number
+  Order.beforeCreate(async (order) => {
+    if (!order.orderNumber) {
+      order.orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    }
+  });
 
-module.exports = mongoose.model('Order', orderSchema);
+  return Order;
+};

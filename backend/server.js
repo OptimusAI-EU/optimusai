@@ -9,8 +9,15 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const config = require('./config/config');
-const connectDB = require('./config/database');
+const { connectDB, sequelize } = require('./config/database');
 const errorHandler = require('./middleware/errorHandler');
+
+// Import models
+const User = require('./models/User');
+const Subscription = require('./models/Subscription');
+const Order = require('./models/Order');
+const ContactForm = require('./models/ContactForm');
+const Product = require('./models/Product');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -22,8 +29,36 @@ const orderRoutes = require('./routes/order');
 // Initialize app
 const app = express();
 
-// Connect to database
-connectDB();
+// Connect to database and sync models
+(async () => {
+  try {
+    await connectDB();
+    
+    // Initialize all models
+    const UserModel = User(sequelize);
+    const SubscriptionModel = Subscription(sequelize);
+    const OrderModel = Order(sequelize);
+    const ContactFormModel = ContactForm(sequelize);
+    const ProductModel = Product(sequelize);
+    
+    // Setup associations
+    UserModel.hasMany(SubscriptionModel, { foreignKey: 'userId' });
+    SubscriptionModel.belongsTo(UserModel, { foreignKey: 'userId' });
+    
+    UserModel.hasMany(OrderModel, { foreignKey: 'userId' });
+    OrderModel.belongsTo(UserModel, { foreignKey: 'userId' });
+    
+    UserModel.hasMany(ContactFormModel, { foreignKey: 'userId' });
+    ContactFormModel.belongsTo(UserModel, { foreignKey: 'userId' });
+    
+    // Sync database
+    await sequelize.sync({ alter: false });
+    console.log('Database models synced successfully.');
+  } catch (error) {
+    console.error('Database initialization error:', error);
+    process.exit(1);
+  }
+})();
 
 // Middleware
 app.use(helmet());

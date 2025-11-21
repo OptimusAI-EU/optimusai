@@ -27,7 +27,7 @@ const NavLink: React.FC<{
 
 const Header: React.FC<HeaderProps> = ({ currentPage, onNavClick }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const navLinks: Page[] = ['About', 'ODIN', 'Robotics', 'Contact'];
+  const navLinks: Page[] = ['About', 'ODIN', 'Robotics', 'Humanoid', 'Contact'];
 
   return (
     <header className="bg-gray-50/95 backdrop-blur-sm sticky top-0 z-50 shadow-lg shadow-gray-300/20 border-b border-gray-200">
