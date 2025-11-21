@@ -7,6 +7,7 @@ import About from './pages/About';
 import Odin from './pages/Odin';
 import Robotics from './pages/Robotics';
 import Contact from './pages/Contact';
+import Humanoid from './pages/Humanoid';
 
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<Page>('About');
@@ -25,13 +26,15 @@ const App: React.FC = () => {
         return <Robotics />;
       case 'Contact':
         return <Contact />;
+      case 'Humanoid':
+        return <Humanoid />;
       default:
         return <About />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col">
+    <div className="min-h-screen bg-white text-gray-800 font-sans flex flex-col">
       <Header currentPage={currentPage} onNavClick={handleNavClick} />
       <main className="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {renderPage()}

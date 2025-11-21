@@ -1,2 +1,2 @@
 
-export type Page = 'About' | 'ODIN' | 'Robotics' | 'Contact';
+export type Page = 'About' | 'ODIN' | 'Robotics' | 'Humanoid' | 'Contact';
