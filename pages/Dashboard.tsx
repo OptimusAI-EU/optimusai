@@ -195,7 +195,7 @@ const Dashboard: React.FC = () => {
               <div className="bg-white p-6 rounded-lg border border-gray-200 hover:shadow-lg transition-shadow">
                 <h3 className="text-gray-600 font-semibold mb-2">Total Simulations</h3>
                 <p className="text-3xl font-bold text-gray-900">{stats.totalSimulations}</p>
-                <p className="text-sm text-blue-600 mt-2">{stats.runningSimulations} running</p>
+                <p className="text-sm text-red-600 mt-2">{stats.runningSimulations} running</p>
               </div>
               <div className="bg-white p-6 rounded-lg border border-gray-200 hover:shadow-lg transition-shadow">
                 <h3 className="text-gray-600 font-semibold mb-2">Active Users</h3>
@@ -226,7 +226,7 @@ const Dashboard: React.FC = () => {
                 <button className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold">
                   Add Robot
                 </button>
-                <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold">
+                <button className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-semibold">
                   View Logs
                 </button>
                 <button className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold">
@@ -354,8 +354,8 @@ const Dashboard: React.FC = () => {
         {activeTab === 'simulations' && (
           <div className="bg-white rounded-lg border border-gray-200 p-6">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Simulations Management</h2>
-            <div className="bg-blue-50 border border-blue-200 p-6 rounded-lg">
-              <p className="text-blue-900 font-semibold mb-2">Running Simulations: {stats.runningSimulations}</p>
+            <div className="bg-red-50 border border-red-200 p-6 rounded-lg">
+              <p className="text-red-900 font-semibold mb-2">Running Simulations: {stats.runningSimulations}</p>
               <div className="space-y-2">
                 {[1, 2, 3].map((sim) => (
                   <div key={sim} className="bg-white border border-gray-200 p-4 rounded-lg flex justify-between items-center">
