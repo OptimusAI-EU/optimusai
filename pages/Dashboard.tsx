@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useAuth } from '../context/AuthContext';
+import PageSection from '../components/PageSection';
 
 interface DashboardStats {
   totalRobots: number;
@@ -28,6 +30,36 @@ interface User {
 }
 
 const Dashboard: React.FC = () => {
+  const { isLoggedIn, isAdmin } = useAuth();
+
+  if (!isLoggedIn || !isAdmin) {
+    return (
+      <PageSection title="Access Denied" subtitle="Admin access required">
+        <div className="text-center py-12">
+          <p className="text-gray-600 mb-6">
+            {!isLoggedIn 
+              ? 'You need to sign in to access the dashboard.'
+              : 'You do not have admin privileges to access this dashboard. Contact support if you believe this is a mistake.'}
+          </p>
+          <div className="flex gap-4 justify-center">
+            <a
+              href="/"
+              className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-lg font-medium transition"
+            >
+              Back to Home
+            </a>
+            <a
+              href="/contact"
+              className="border-2 border-red-600 text-red-600 hover:bg-red-50 px-8 py-3 rounded-lg font-medium transition"
+            >
+              Contact Support
+            </a>
+          </div>
+        </div>
+      </PageSection>
+    );
+  }
+
   const [activeTab, setActiveTab] = useState<'overview' | 'robots' | 'users' | 'simulations'>('overview');
 
   const stats: DashboardStats = {

@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import LoginModal from '../components/LoginModal';
 import PageSection from '../components/PageSection';
 
 interface Subscription {
@@ -20,7 +22,63 @@ interface Invoice {
   description: string;
 }
 
+interface OrderItem {
+  id: string;
+  name: string;
+  price?: number;
+  monthlyPrice?: number;
+  annualPrice?: number;
+  quantity: number;
+}
+
+interface Order {
+  id: string;
+  date: string;
+  items: OrderItem[];
+  subtotal: number;
+  shipping: number;
+  total: number;
+  paymentMethod: string;
+  status: 'pending' | 'completed' | 'failed';
+  shippingAddress?: any;
+}
+
 const Billing: React.FC = () => {
+  const { isLoggedIn, user } = useAuth();
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  useEffect(() => {
+    // Load user's orders from localStorage
+    try {
+      const allOrders = JSON.parse(localStorage.getItem('orders') || '[]');
+      setOrders(allOrders);
+    } catch (error) {
+      console.error('Error loading orders:', error);
+    }
+  }, [user]);
+
+  if (!isLoggedIn) {
+    return (
+      <>
+        <PageSection title="Billing & Subscriptions" subtitle="Sign in to manage your subscriptions and invoices">
+          <div className="text-center py-12">
+            <p className="text-gray-600 mb-6">
+              You need to sign in to access your billing information and manage subscriptions.
+            </p>
+            <button
+              onClick={() => setShowLoginModal(true)}
+              className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-lg font-medium transition"
+            >
+              Sign In to Continue
+            </button>
+          </div>
+        </PageSection>
+        <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
+      </>
+    );
+  }
+
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([
     {
       id: 'sub_1',
@@ -257,6 +315,93 @@ const Billing: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Pending Orders */}
+      {orders.length > 0 && (
+        <div>
+          <h2 className="text-3xl font-bold text-gray-900 mb-8">Your Orders</h2>
+          <div className="space-y-6">
+            {orders.map((order) => (
+              <div
+                key={order.id}
+                className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">Order {order.id}</h3>
+                    <div className="space-y-2">
+                      <p className="text-sm text-gray-700">
+                        <span className="font-semibold">Date:</span>{' '}
+                        {new Date(order.date).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                        })}
+                      </p>
+                      <p className="text-sm text-gray-700">
+                        <span className="font-semibold">Items:</span> {order.items.length}
+                      </p>
+                      <div className="mt-3">
+                        <p className="text-sm font-semibold text-gray-700 mb-1">Items ordered:</p>
+                        <ul className="text-sm text-gray-600 space-y-1">
+                          {order.items.map((item) => (
+                            <li key={item.id}>• {item.name} (Qty: {item.quantity})</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600 mb-2">Order Total</p>
+                      <p className="text-3xl font-bold text-red-600 mb-2">${order.total.toFixed(2)}</p>
+                      <span
+                        className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
+                          order.status === 'completed'
+                            ? 'bg-green-100 text-green-700'
+                            : order.status === 'pending'
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'bg-red-100 text-red-700'
+                        }`}
+                      >
+                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      </span>
+                    </div>
+
+                    {order.status === 'completed' && (
+                      <div className="mt-4">
+                        <p className="text-sm text-gray-700 mb-2">Estimated Delivery</p>
+                        <p className="font-semibold text-gray-900">
+                          {new Date(new Date(order.date).getTime() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {order.status === 'completed' && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <p className="text-sm font-semibold text-gray-900 mb-2">Shipping Address</p>
+                    {order.shippingAddress ? (
+                      <p className="text-sm text-gray-700">
+                        {order.shippingAddress.fullName}, {order.shippingAddress.address}, {order.shippingAddress.city},{' '}
+                        {order.shippingAddress.state} {order.shippingAddress.zipCode}, {order.shippingAddress.country}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-gray-600">Shipping address not available</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Support Section */}
       <PageSection title="Need Help?">
