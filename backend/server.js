@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const passport = require('passport');
 const session = require('express-session');
+const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 
 require('dotenv').config();
@@ -12,19 +13,14 @@ const config = require('./config/config');
 const { connectDB, sequelize } = require('./config/database');
 const errorHandler = require('./middleware/errorHandler');
 
-// Import models
-const User = require('./models/User');
-const Subscription = require('./models/Subscription');
-const Order = require('./models/Order');
-const ContactForm = require('./models/ContactForm');
-const Product = require('./models/Product');
-
-// Import routes
+// Import routes (models will be initialized when needed)
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const contactRoutes = require('./routes/contact');
 const subscriptionRoutes = require('./routes/subscription');
 const orderRoutes = require('./routes/order');
+const adminRoutes = require('./routes/admin');
+const preferencesRoutes = require('./routes/preferences');
 
 // Initialize app
 const app = express();
@@ -34,22 +30,8 @@ const app = express();
   try {
     await connectDB();
     
-    // Initialize all models
-    const UserModel = User(sequelize);
-    const SubscriptionModel = Subscription(sequelize);
-    const OrderModel = Order(sequelize);
-    const ContactFormModel = ContactForm(sequelize);
-    const ProductModel = Product(sequelize);
-    
-    // Setup associations
-    UserModel.hasMany(SubscriptionModel, { foreignKey: 'userId' });
-    SubscriptionModel.belongsTo(UserModel, { foreignKey: 'userId' });
-    
-    UserModel.hasMany(OrderModel, { foreignKey: 'userId' });
-    OrderModel.belongsTo(UserModel, { foreignKey: 'userId' });
-    
-    UserModel.hasMany(ContactFormModel, { foreignKey: 'userId' });
-    ContactFormModel.belongsTo(UserModel, { foreignKey: 'userId' });
+    // Import and initialize models (this will set up all models with associations)
+    const { User, Subscription, Order, ContactForm, Product, UserSession, UserPreference } = require('./models');
     
     // Sync database
     await sequelize.sync({ alter: false });
@@ -63,11 +45,26 @@ const app = express();
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: config.frontendUrl,
+  origin: function(origin, callback) {
+    // Allow multiple frontend origins (development and production)
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:3001',
+      config.frontendUrl
+    ];
+    
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(cookieParser());
 app.use(morgan('combined'));
 
 // Rate limiting
@@ -109,6 +106,8 @@ app.use('/api/users', userRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/user', preferencesRoutes);
 
 // 404 handler
 app.use((req, res) => {

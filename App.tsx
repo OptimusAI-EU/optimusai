@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { Page } from './types';
-import { AuthProvider } from './context/AuthContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import Home from './pages/Home';
@@ -19,15 +19,56 @@ import Billing from './pages/Billing';
 import Checkout from './pages/Checkout';
 import Products from './pages/Products';
 import Contact from './pages/Contact';
+import VerifyEmail from './pages/VerifyEmail';
+import AuthCallback from './pages/AuthCallback';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 
 const App: React.FC = () => {
-  const [currentPage, setCurrentPage] = useState<Page>('Home');
+  const [currentPage, setCurrentPage] = useState<Page>(() => {
+    // Restore the last visited page from localStorage
+    try {
+      const savedPage = localStorage.getItem('lastVisitedPage');
+      return (savedPage as Page) || 'Home';
+    } catch {
+      return 'Home';
+    }
+  });
+  const location = useLocation();
 
   const handleNavClick = useCallback((page: Page) => {
     setCurrentPage(page);
+    // Save the current page to localStorage
+    localStorage.setItem('lastVisitedPage', page);
   }, []);
 
+  // Check if we're on special routes
+  const isVerifyEmailPage = location.pathname === '/verify-email';
+  const isAuthCallbackPage = location.pathname === '/auth/callback';
+  const isForgotPasswordPage = location.pathname === '/forgot-password';
+  const isResetPasswordPage = location.pathname === '/reset-password';
+
   const renderPage = () => {
+    // Handle auth callback route
+    if (isAuthCallbackPage) {
+      return <AuthCallback />;
+    }
+
+    // Handle verify-email route
+    if (isVerifyEmailPage) {
+      return <VerifyEmail />;
+    }
+
+    // Handle forgot-password route
+    if (isForgotPasswordPage) {
+      return <ForgotPassword />;
+    }
+
+    // Handle reset-password route
+    if (isResetPasswordPage) {
+      return <ResetPassword />;
+    }
+
     switch (currentPage) {
       case 'Home':
         return <Home />;
@@ -67,15 +108,13 @@ const App: React.FC = () => {
   };
 
   return (
-    <AuthProvider>
-      <div className="min-h-screen bg-white text-gray-800 font-sans flex flex-col">
-        <Header currentPage={currentPage} onNavClick={handleNavClick} />
-        <main className="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {renderPage()}
-        </main>
-        <Footer />
-      </div>
-    </AuthProvider>
+    <div className="min-h-screen bg-white text-gray-800 font-sans flex flex-col">
+      <Header currentPage={currentPage} onNavClick={handleNavClick} />
+      <main className="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {renderPage()}
+      </main>
+      <Footer />
+    </div>
   );
 };
 

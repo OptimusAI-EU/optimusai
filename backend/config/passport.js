@@ -5,8 +5,16 @@ const GitHubStrategy = require('passport-github2').Strategy;
 const JWTStrategy = require('passport-jwt').Strategy;
 const ExtractJwt = require('passport-jwt').ExtractJwt;
 
-const User = require('../models/User');
 const config = require('./config');
+
+// Lazy load User model to avoid circular dependencies
+let User;
+const getUser = () => {
+  if (!User) {
+    User = require('../models').User;
+  }
+  return User;
+};
 
 // Serialize user
 passport.serializeUser((user, done) => {
@@ -16,7 +24,7 @@ passport.serializeUser((user, done) => {
 // Deserialize user
 passport.deserializeUser(async (id, done) => {
   try {
-    const user = await User.findById(id);
+    const user = await getUser().findByPk(id);
     done(null, user);
   } catch (error) {
     done(error);
@@ -33,7 +41,7 @@ passport.use(
     },
     async (email, password, done) => {
       try {
-        const user = await User.findOne({ email }).select('+password');
+        const user = await getUser().findOne({ where: { email } });
 
         if (!user) {
           return done(null, false, { message: 'User not found' });
@@ -62,21 +70,37 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
-        let user = await User.findOne({ 'oauth.googleId': profile.id });
+        // Try to find user by Google ID
+        let user = await getUser().findOne({ 
+          where: {
+            googleId: profile.id
+          }
+        });
 
         if (!user) {
-          user = new User({
-            email: profile.emails[0].value,
-            firstName: profile.given_name || profile.displayName,
-            lastName: profile.family_name || '',
-            oauth: {
-              googleId: profile.id,
-              googleProfile: profile,
-            },
-            isEmailVerified: true,
-          });
+          // Try to find by email
+          const email = profile.emails?.[0]?.value;
+          if (email) {
+            user = await getUser().findOne({ where: { email } });
+          }
 
-          await user.save();
+          if (!user) {
+            // Create new user
+            user = await getUser().create({
+              email: profile.emails?.[0]?.value || `${profile.id}@google.local`,
+              firstName: profile.given_name || profile.displayName?.split(' ')[0] || 'User',
+              lastName: profile.family_name || profile.displayName?.split(' ')[1] || '',
+              googleId: profile.id,
+              googleProfile: JSON.stringify(profile),
+              isEmailVerified: true, // Auto-verify users from OAuth
+            });
+          } else {
+            // Link existing user with Google account
+            await user.update({ 
+              googleId: profile.id,
+              googleProfile: JSON.stringify(profile),
+            });
+          }
         }
 
         done(null, user);
@@ -97,22 +121,37 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
-        let user = await User.findOne({ 'oauth.githubId': profile.id });
+        // Try to find user by GitHub ID
+        let user = await getUser().findOne({ 
+          where: {
+            githubId: profile.id
+          }
+        });
 
         if (!user) {
-          const email = profile.emails?.[0]?.value || `${profile.username}@github.local`;
-          user = new User({
-            email,
-            firstName: profile.displayName || profile.username,
-            lastName: '',
-            oauth: {
-              githubId: profile.id,
-              githubProfile: profile,
-            },
-            isEmailVerified: !!profile.emails?.[0]?.value,
-          });
+          // Try to find by email
+          const email = profile.emails?.[0]?.value;
+          if (email) {
+            user = await getUser().findOne({ where: { email } });
+          }
 
-          await user.save();
+          if (!user) {
+            // Create new user
+            user = await getUser().create({
+              email: profile.emails?.[0]?.value || `${profile.username}@github.local`,
+              firstName: profile.displayName || profile.username || 'User',
+              lastName: '',
+              githubId: profile.id,
+              githubProfile: JSON.stringify(profile),
+              isEmailVerified: !!profile.emails?.[0]?.value, // Only auto-verify if email is public
+            });
+          } else {
+            // Link existing user with GitHub account
+            await user.update({ 
+              githubId: profile.id,
+              githubProfile: JSON.stringify(profile),
+            });
+          }
         }
 
         done(null, user);
@@ -132,7 +171,7 @@ passport.use(
     },
     async (payload, done) => {
       try {
-        const user = await User.findById(payload.userId);
+        const user = await getUser().findByPk(payload.userId);
 
         if (!user) {
           return done(null, false);
@@ -145,3 +184,5 @@ passport.use(
     }
   )
 );
+
+module.exports = passport;

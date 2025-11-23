@@ -75,6 +75,22 @@ module.exports = (sequelize) => {
       oauth: {
         type: DataTypes.JSON,
       },
+      googleId: {
+        type: DataTypes.STRING,
+        unique: true,
+        allowNull: true,
+      },
+      googleProfile: {
+        type: DataTypes.TEXT,
+      },
+      githubId: {
+        type: DataTypes.STRING,
+        unique: true,
+        allowNull: true,
+      },
+      githubProfile: {
+        type: DataTypes.TEXT,
+      },
       isEmailVerified: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
