@@ -1,19 +1,244 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const crypto = require('crypto');
 const config = require('../config/config');
 const validator = require('validator');
+const nodemailer = require('nodemailer');
+const geoip = require('geoip-lite');
+const axios = require('axios');
+
+// Lazy load User model to avoid circular dependencies
+let User;
+const getUser = () => {
+  if (!User) {
+    User = require('../models').User;
+  }
+  return User;
+};
+
+// Email transporter setup
+const emailTransporter = nodemailer.createTransport({
+  host: config.email.host,
+  port: parseInt(config.email.port) || 587,
+  secure: false,
+  auth: {
+    user: config.email.user,
+    pass: config.email.password,
+  },
+});
+
+// Generate email verification token
+const generateVerificationToken = () => {
+  const token = crypto.randomBytes(32).toString('hex');
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+  return { token, hash };
+};
+
+// Send verification email
+const sendVerificationEmail = async (email, firstName, verificationToken) => {
+  const verificationUrl = `${config.frontendUrl}/verify-email?token=${verificationToken}`;
+  
+  const mailOptions = {
+    from: config.email.user,
+    to: email,
+    subject: 'Email Verification - Optimus AI',
+    html: `
+      <h2>Welcome to Optimus AI, ${firstName}!</h2>
+      <p>Please verify your email address by clicking the link below:</p>
+      <a href="${verificationUrl}" style="display: inline-block; padding: 10px 20px; background-color: #dc2626; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0;">
+        Verify Email Address
+      </a>
+      <p>Or copy and paste this link in your browser:</p>
+      <p>${verificationUrl}</p>
+      <p>This link will expire in 24 hours.</p>
+      <p>If you did not create this account, please ignore this email.</p>
+    `,
+  };
+
+  try {
+    await emailTransporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error('Email sending error:', error);
+    return false;
+  }
+};
 
 // Generate JWT tokens
 const generateTokens = (userId, role) => {
-  const accessToken = jwt.sign({ userId, role }, config.jwtSecret, {
+  const accessToken = jwt.sign({ userId, role, id: userId }, config.jwtSecret, {
     expiresIn: config.jwtExpire,
   });
 
-  const refreshToken = jwt.sign({ userId }, config.jwtRefreshSecret, {
+  const refreshToken = jwt.sign({ userId, id: userId }, config.jwtRefreshSecret, {
     expiresIn: config.jwtRefreshExpire,
   });
 
   return { accessToken, refreshToken };
+};
+
+// Set authentication cookies
+const setAuthCookies = (res, accessToken, refreshToken) => {
+  const isProduction = config.env === 'production';
+  
+  // Access token cookie (15 minutes)
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true, // Prevents JavaScript from accessing the cookie
+    secure: isProduction, // Only send over HTTPS in production
+    sameSite: 'Strict', // CSRF protection
+    maxAge: 15 * 60 * 1000, // 15 minutes
+    path: '/',
+  });
+
+  // Refresh token cookie (7 days)
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'Strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    path: '/',
+  });
+};
+
+// Get user's IP address
+const getClientIp = (req) => {
+  return (
+    req.headers['x-forwarded-for']?.split(',')[0].trim() ||
+    req.socket.remoteAddress ||
+    'unknown'
+  );
+};
+
+// Fetch location data from IP address
+const fetchLocationFromIp = async (ipAddress) => {
+  try {
+    // Check if it's a localhost/private IP
+    const isLocalhost = ipAddress === '::1' || ipAddress === '127.0.0.1' || 
+                       ipAddress.startsWith('192.168.') || 
+                       ipAddress.startsWith('10.') ||
+                       ipAddress.startsWith('172.');
+    
+    // For localhost, try to get actual public IP first
+    if (isLocalhost) {
+      try {
+        const publicIpResponse = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
+        if (publicIpResponse.data && publicIpResponse.data.ip) {
+          return await fetchLocationFromIp(publicIpResponse.data.ip);
+        }
+      } catch (e) {
+        console.log('Could not get public IP for localhost, using mock data');
+      }
+      
+      // Return mock data for localhost
+      return {
+        ip: ipAddress,
+        country: 'US',
+        city: 'San Francisco',
+        latitude: 37.7749,
+        longitude: -122.4194,
+        isp: 'Local Development',
+        timezone: 'America/Los_Angeles',
+      };
+    }
+
+    // Try ipapi.co first (has ISP info)
+    try {
+      const response = await axios.get(`https://ipapi.co/${ipAddress}/json/`, { timeout: 5000 });
+      if (response.data) {
+        return {
+          ip: ipAddress,
+          country: response.data.country_name || response.data.country_code || 'Unknown',
+          city: response.data.city || 'Unknown',
+          latitude: response.data.latitude,
+          longitude: response.data.longitude,
+          isp: response.data.org || 'Unknown',
+          timezone: response.data.timezone,
+        };
+      }
+    } catch (apiError) {
+      console.error('Error fetching from ipapi:', apiError.message);
+    }
+
+    // Fallback: use geoip-lite
+    try {
+      const geoData = geoip.lookup(ipAddress);
+      if (geoData) {
+        return {
+          ip: ipAddress,
+          country: geoData.country,
+          city: geoData.city || 'Unknown',
+          latitude: geoData.ll ? geoData.ll[0] : null,
+          longitude: geoData.ll ? geoData.ll[1] : null,
+          isp: 'Unknown',
+          timezone: geoData.timezone,
+        };
+      }
+    } catch (geoError) {
+      console.error('Error with geoip-lite:', geoError.message);
+    }
+
+    return {
+      ip: ipAddress,
+      country: 'Unknown',
+      city: 'Unknown',
+      latitude: null,
+      longitude: null,
+      isp: 'Unknown',
+      timezone: 'Unknown',
+    };
+  } catch (error) {
+    console.error('Error fetching location data:', error);
+    return {
+      ip: ipAddress,
+      country: 'Unknown',
+      city: 'Unknown',
+      latitude: null,
+      longitude: null,
+      isp: 'Unknown',
+      timezone: 'Unknown',
+    };
+  }
+};
+
+// Create user session record
+const createUserSession = async (userId, req) => {
+  try {
+    const { UserSession } = require('../models');
+    const ipAddress = getClientIp(req);
+    
+    // Fetch location data
+    const location = await fetchLocationFromIp(ipAddress);
+    
+    const session = await UserSession.create({
+      userId,
+      ipAddress,
+      location,
+      userAgent: req.headers['user-agent'] || 'unknown',
+      loginTime: new Date(),
+      isActive: true,
+    });
+
+    return session;
+  } catch (error) {
+    console.error('Error creating user session:', error);
+    return null;
+  }
+};
+
+// Update user preferences on login
+const ensureUserPreferences = async (userId) => {
+  try {
+    const { UserPreference } = require('../models');
+    
+    let preferences = await UserPreference.findOne({ where: { userId } });
+    if (!preferences) {
+      preferences = await UserPreference.create({ userId });
+    }
+    
+    return preferences;
+  } catch (error) {
+    console.error('Error ensuring user preferences:', error);
+    return null;
+  }
 };
 
 // Register with email/password
@@ -36,15 +261,17 @@ exports.register = async (req, res, next) => {
       });
     }
 
-    if (password.length < 8) {
+    // Password validation: 8+ chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[a-zA-Z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
+    if (!passwordRegex.test(password)) {
       return res.status(400).json({
         success: false,
-        message: 'Password must be at least 8 characters',
+        message: 'Password must be 8+ characters with uppercase, lowercase, number, and special character',
       });
     }
 
     // Check if user exists
-    let user = await User.findOne({ email });
+    let user = await getUser().findOne({ where: { email } });
     if (user) {
       return res.status(409).json({
         success: false,
@@ -52,19 +279,43 @@ exports.register = async (req, res, next) => {
       });
     }
 
+    // Generate verification token
+    const { token, hash } = generateVerificationToken();
+
     // Create user
-    user = new User({
+    user = await getUser().create({
       email,
       password,
       firstName,
       lastName,
       phone,
-      isEmailVerified: false,
+      isEmailVerified: email === 'optimusrobots@proton.me', // Auto-verify admin email
+      emailVerificationToken: hash,
+      emailVerificationExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
     });
 
-    await user.save();
+    // Send verification email only if not admin email
+    if (email !== 'optimusrobots@proton.me') {
+      const emailSent = await sendVerificationEmail(email, firstName, token);
+      
+      if (!emailSent) {
+        // Delete user if email fails to send
+        await user.destroy();
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to send verification email. Please try again later.',
+        });
+      }
 
-    const { accessToken, refreshToken } = generateTokens(user._id, user.role);
+      return res.status(201).json({
+        success: true,
+        message: 'Registration successful. Please check your email to verify your account.',
+        user: user.getPublicProfile(),
+      });
+    }
+
+    // For admin email, auto-login
+    const { accessToken, refreshToken } = generateTokens(user.id, user.role);
 
     res.status(201).json({
       success: true,
@@ -90,8 +341,8 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    // Find user and select password field
-    const user = await User.findOne({ email }).select('+password');
+    // Find user by email
+    const user = await getUser().findOne({ where: { email } });
 
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({
@@ -107,16 +358,27 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    // Log login history
-    user.loginHistory.push({
-      timestamp: new Date(),
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
-    });
+    // Check if email is verified (skip for admin email)
+    if (!user.isEmailVerified && email !== 'optimusrobots@proton.me') {
+      return res.status(403).json({
+        success: false,
+        message: 'Please verify your email address before signing in',
+      });
+    }
 
-    await user.save();
+    // Update last login
+    await user.update({ lastLogin: new Date() });
 
-    const { accessToken, refreshToken } = generateTokens(user._id, user.role);
+    const { accessToken, refreshToken } = generateTokens(user.id, user.role);
+
+    // Set authentication cookies
+    setAuthCookies(res, accessToken, refreshToken);
+
+    // Create user session record
+    await createUserSession(user.id, req);
+
+    // Ensure user preferences exist
+    await ensureUserPreferences(user.id);
 
     res.json({
       success: true,
@@ -133,76 +395,66 @@ exports.login = async (req, res, next) => {
 // Google OAuth callback
 exports.googleCallback = async (req, res, next) => {
   try {
-    const { id, displayName, emails, photos } = req.user;
-    const email = emails[0].value;
-    const [firstName, lastName] = displayName.split(' ');
-
-    let user = await User.findOne({ 'oauth.googleId': id });
+    // User is already created/found by Passport strategy
+    const user = req.user;
 
     if (!user) {
-      user = await User.findOne({ email });
-
-      if (!user) {
-        user = new User({
-          email,
-          firstName: firstName || 'User',
-          lastName: lastName || '',
-          isEmailVerified: true,
-        });
-      }
-
-      user.oauth.googleId = id;
-      user.oauth.googleProfile = req.user;
+      return res.redirect(`${config.frontendUrl}?auth=failed`);
     }
 
-    await user.save();
+    // Update last login
+    await user.update({ lastLogin: new Date() });
 
-    const { accessToken, refreshToken } = generateTokens(user._id, user.role);
+    const { accessToken, refreshToken } = generateTokens(user.id, user.role);
 
-    // Redirect to frontend with tokens
+    // Set authentication cookies
+    setAuthCookies(res, accessToken, refreshToken);
+
+    // Create user session record
+    await createUserSession(user.id, req);
+
+    // Ensure user preferences exist
+    await ensureUserPreferences(user.id);
+
+    // Redirect to frontend with tokens in URL
     res.redirect(
-      `${config.frontendUrl}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`
+      `${config.frontendUrl}/auth/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&provider=google`
     );
   } catch (error) {
-    next(error);
+    res.redirect(`${config.frontendUrl}?auth=error`);
   }
 };
 
 // GitHub OAuth callback
 exports.githubCallback = async (req, res, next) => {
   try {
-    const { id, username, displayName, emails, photos } = req.user;
-    const email = emails?.[0]?.value;
-    const [firstName, lastName] = (displayName || username).split(' ');
-
-    let user = await User.findOne({ 'oauth.githubId': id });
+    // User is already created/found by Passport strategy
+    const user = req.user;
 
     if (!user) {
-      user = await User.findOne({ email });
-
-      if (!user) {
-        user = new User({
-          email: email || `${username}@github.local`,
-          firstName: firstName || username,
-          lastName: lastName || '',
-          isEmailVerified: !!email,
-        });
-      }
-
-      user.oauth.githubId = id;
-      user.oauth.githubProfile = req.user;
+      return res.redirect(`${config.frontendUrl}?auth=failed`);
     }
 
-    await user.save();
+    // Update last login
+    await user.update({ lastLogin: new Date() });
 
-    const { accessToken, refreshToken } = generateTokens(user._id, user.role);
+    const { accessToken, refreshToken } = generateTokens(user.id, user.role);
 
-    // Redirect to frontend with tokens
+    // Set authentication cookies
+    setAuthCookies(res, accessToken, refreshToken);
+
+    // Create user session record
+    await createUserSession(user.id, req);
+
+    // Ensure user preferences exist
+    await ensureUserPreferences(user.id);
+
+    // Redirect to frontend with tokens in URL
     res.redirect(
-      `${config.frontendUrl}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`
+      `${config.frontendUrl}/auth/callback?accessToken=${encodeURIComponent(accessToken)}&refreshToken=${encodeURIComponent(refreshToken)}&provider=github`
     );
   } catch (error) {
-    next(error);
+    res.redirect(`${config.frontendUrl}?auth=error`);
   }
 };
 
@@ -250,6 +502,25 @@ exports.refreshToken = async (req, res, next) => {
 // Logout
 exports.logout = async (req, res, next) => {
   try {
+    const userId = req.user?.id || req.userId;
+
+    if (userId) {
+      try {
+        // Mark session as inactive
+        const { UserSession } = require('../models');
+        await UserSession.update(
+          { isActive: false, logoutTime: new Date() },
+          { where: { userId, isActive: true } }
+        );
+      } catch (error) {
+        console.error('Error updating user session:', error);
+      }
+    }
+
+    // Clear authentication cookies
+    res.clearCookie('accessToken', { path: '/' });
+    res.clearCookie('refreshToken', { path: '/' });
+
     res.json({
       success: true,
       message: 'Logged out successfully',
@@ -258,3 +529,272 @@ exports.logout = async (req, res, next) => {
     next(error);
   }
 };
+
+// Verify email address
+exports.verifyEmail = async (req, res, next) => {
+  try {
+    // Token can come from query params or request body
+    const token = req.query.token || req.body.token;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Verification token is required',
+      });
+    }
+
+    // Hash the token to match the stored hash
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    // Find user with matching token
+    const user = await getUser().findOne({
+      where: {
+        emailVerificationToken: tokenHash,
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid verification token',
+      });
+    }
+
+    // Check if token has expired
+    if (user.emailVerificationExpires < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Verification token has expired. Please sign up again.',
+      });
+    }
+
+    // Verify email and clear tokens
+    await user.update({
+      isEmailVerified: true,
+      emailVerificationToken: null,
+      emailVerificationExpires: null,
+    });
+
+    res.json({
+      success: true,
+      message: 'Email verified successfully. You can now sign in with your account.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Resend verification email
+exports.resendVerificationEmail = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required',
+      });
+    }
+
+    const user = await getUser().findOne({ where: { email } });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is already verified',
+      });
+    }
+
+    // Generate new verification token
+    const { token, hash } = generateVerificationToken();
+
+    await user.update({
+      emailVerificationToken: hash,
+      emailVerificationExpires: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+    });
+
+    const emailSent = await sendVerificationEmail(email, user.firstName, token);
+
+    if (!emailSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send verification email. Please try again later.',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Verification email resent successfully. Please check your email.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Send password reset email
+const sendPasswordResetEmail = async (email, firstName, resetToken) => {
+  const resetUrl = `${config.frontendUrl}/reset-password?token=${resetToken}`;
+  
+  const mailOptions = {
+    from: config.email.user,
+    to: email,
+    subject: 'Password Reset - Optimus AI',
+    html: `
+      <h2>Password Reset Request</h2>
+      <p>Hi ${firstName},</p>
+      <p>We received a request to reset your password. Click the link below to create a new password:</p>
+      <a href="${resetUrl}" style="display: inline-block; padding: 10px 20px; background-color: #dc2626; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0;">
+        Reset Password
+      </a>
+      <p>Or copy and paste this link in your browser:</p>
+      <p>${resetUrl}</p>
+      <p><strong>This link will expire in 1 hour.</strong></p>
+      <p>If you did not request a password reset, please ignore this email and your password will remain unchanged.</p>
+      <p>For security reasons, do not share this link with anyone.</p>
+    `,
+  };
+
+  try {
+    await emailTransporter.sendMail(mailOptions);
+    return true;
+  } catch (error) {
+    console.error('Password reset email sending error:', error);
+    return false;
+  }
+};
+
+// Forgot password - send reset email
+exports.forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    // Validation
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide your email address',
+      });
+    }
+
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email address',
+      });
+    }
+
+    const User = getUser();
+    const user = await User.findOne({ where: { email: email.toLowerCase() } });
+
+    if (!user) {
+      // Security: Return specific error for non-existent email
+      return res.status(404).json({
+        success: false,
+        message: 'No user account is associated with this email address.',
+      });
+    }
+
+    // Generate password reset token
+    const { token, hash } = generateVerificationToken();
+
+    // Store hash and expiration (1 hour)
+    await user.update({
+      passwordResetToken: hash,
+      passwordResetExpires: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
+    });
+
+    const emailSent = await sendPasswordResetEmail(email, user.firstName, token);
+
+    if (!emailSent) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send password reset email. Please try again later.',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Password reset email sent successfully. Please check your email.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Reset password with token
+exports.resetPassword = async (req, res, next) => {
+  try {
+    const { token, newPassword, confirmPassword } = req.body;
+
+    // Validation
+    if (!token || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide all required fields',
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Passwords do not match',
+      });
+    }
+
+    // Password validation: 8+ chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[a-zA-Z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 8 characters and contain uppercase, lowercase, number, and special character',
+      });
+    }
+
+    // Hash the token to compare with stored hash
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const User = getUser();
+    const user = await User.findOne({
+      where: {
+        passwordResetToken: tokenHash,
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired reset token',
+      });
+    }
+
+    // Check if token has expired
+    if (new Date() > user.passwordResetExpires) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password reset token has expired. Please request a new one.',
+      });
+    }
+
+    // Update password and clear reset token
+    await user.update({
+      password: newPassword,
+      passwordResetToken: null,
+      passwordResetExpires: null,
+    });
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully. You can now log in with your new password.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 interface LoginModalProps {
@@ -7,28 +9,85 @@ interface LoginModalProps {
 }
 
 const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
+  const navigate = useNavigate();
   const { signInWithEmail, signInWithGoogle, signInWithGithub } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [signUpMessage, setSignUpMessage] = useState('');
+
+  // Password validation regex
+  const validatePassword = (pwd: string): { valid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    if (pwd.length < 8) errors.push('At least 8 characters');
+    if (!/[a-z]/.test(pwd)) errors.push('One lowercase letter');
+    if (!/[A-Z]/.test(pwd)) errors.push('One uppercase letter');
+    if (!/\d/.test(pwd)) errors.push('One number');
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd)) errors.push('One special character');
+    return { valid: errors.length === 0, errors };
+  };
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
     setError('');
-    try {
-      if (email === 'admin@optimusai.dev' && password === 'admin123') {
-        await signInWithEmail(email, password, true);
-      } else {
-        await signInWithEmail(email, password);
+    setSignUpMessage('');
+
+    // Signup validation
+    if (isSignUp) {
+      // Check required fields
+      if (!firstName.trim() || !lastName.trim()) {
+        setError('Please provide first and last name');
+        return;
       }
-      setEmail('');
-      setPassword('');
-      onClose();
+
+      // Check if passwords match
+      if (password !== confirmPassword) {
+        setError('Passwords do not match');
+        return;
+      }
+
+      // Validate password strength
+      const { valid, errors } = validatePassword(password);
+      if (!valid) {
+        setError(`Password must have: ${errors.join(', ')}`);
+        return;
+      }
+    }
+
+    setIsLoading(true);
+    try {
+      if (isSignUp) {
+        // For signup, we'll register and they'll need to verify email
+        await signInWithEmail(email, password, false, true, firstName, lastName);
+        setSignUpMessage('Account created! Please check your email to verify your address. Only optimusrobots@proton.me can skip verification.');
+        // Clear form after successful signup
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
+        setFirstName('');
+        setLastName('');
+        setTimeout(() => {
+          setIsSignUp(false);
+          setSignUpMessage('');
+        }, 5000);
+      } else {
+        if (email === 'admin@optimusai.dev' && password === 'admin123') {
+          await signInWithEmail(email, password, true);
+        } else {
+          await signInWithEmail(email, password);
+        }
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
+        onClose();
+      }
     } catch (err) {
-      setError('Failed to sign in with email');
+      setError(err instanceof Error ? err.message : (isSignUp ? 'Failed to create account' : 'Failed to sign in with email'));
     }
     setIsLoading(false);
   };
@@ -59,11 +118,14 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+  const modalRoot = document.getElementById('modal-root');
+  if (!modalRoot) return null;
+
+  const modalContent = (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4 overflow-y-auto">
+      <div className="bg-white rounded-lg shadow-2xl w-full max-w-md my-8 z-[10000]">
         {/* Header */}
-        <div className="bg-gradient-to-r from-red-600 to-red-700 px-6 py-8 text-white">
+        <div className="bg-gradient-to-r from-red-600 to-red-700 px-6 py-8 text-white sticky top-0 z-[10001]">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-3xl font-bold">{isSignUp ? 'Create Account' : 'Sign In'}</h2>
             <button
@@ -78,11 +140,17 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
           </p>
         </div>
 
-        {/* Content */}
-        <div className="p-6">
+        {/* Content - Scrollable */}
+        <div className="p-6 overflow-y-auto max-h-[calc(100vh-200px)]">
           {error && (
             <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md text-sm border border-red-200">
               {error}
+            </div>
+          )}
+
+          {signUpMessage && (
+            <div className="mb-4 p-3 bg-green-100 text-green-700 rounded-md text-sm border border-green-200">
+              {signUpMessage}
             </div>
           )}
 
@@ -142,6 +210,39 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
 
           {/* Email Form */}
           <form onSubmit={handleEmailSignIn} className="space-y-4">
+            {isSignUp && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="firstName" className="block text-sm font-semibold text-gray-700 mb-2">
+                    First Name
+                  </label>
+                  <input
+                    type="text"
+                    id="firstName"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="John"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-colors"
+                    required={isSignUp}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="lastName" className="block text-sm font-semibold text-gray-700 mb-2">
+                    Last Name
+                  </label>
+                  <input
+                    type="text"
+                    id="lastName"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Doe"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-colors"
+                    required={isSignUp}
+                  />
+                </div>
+              </div>
+            )}
+
             <div>
               <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-2">
                 Email Address
@@ -170,7 +271,35 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-colors"
                 required
               />
+              {isSignUp && (
+                <p className="text-xs text-gray-600 mt-2">
+                  Must be 8+ characters with uppercase, lowercase, number, and special character
+                </p>
+              )}
             </div>
+
+            {isSignUp && (
+              <div>
+                <label htmlFor="confirmPassword" className="block text-sm font-semibold text-gray-700 mb-2">
+                  Confirm Password
+                </label>
+                <input
+                  type="password"
+                  id="confirmPassword"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-colors"
+                  required
+                />
+                {password && confirmPassword && password === confirmPassword && (
+                  <p className="text-xs text-green-600 mt-2">✓ Passwords match</p>
+                )}
+                {password && confirmPassword && password !== confirmPassword && (
+                  <p className="text-xs text-red-600 mt-2">✗ Passwords do not match</p>
+                )}
+              </div>
+            )}
 
             {!isSignUp && (
               <div className="flex items-center justify-between">
@@ -181,9 +310,16 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                   />
                   <span className="ml-2 text-sm text-gray-600">Remember me</span>
                 </label>
-                <a href="#" className="text-sm text-red-600 hover:text-red-700 font-medium">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    navigate('/forgot-password');
+                  }}
+                  className="text-sm text-red-600 hover:text-red-700 font-medium"
+                >
                   Forgot password?
-                </a>
+                </button>
               </div>
             )}
 
@@ -213,7 +349,11 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
                 setIsSignUp(!isSignUp);
                 setEmail('');
                 setPassword('');
+                setConfirmPassword('');
+                setFirstName('');
+                setLastName('');
                 setError('');
+                setSignUpMessage('');
               }}
               className="text-red-600 hover:text-red-700 font-semibold cursor-pointer"
             >
@@ -224,6 +364,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
       </div>
     </div>
   );
+
+  return createPortal(modalContent, modalRoot);
 };
 
 export default LoginModal;

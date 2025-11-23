@@ -11,6 +11,15 @@ router.post('/login', authController.login);
 router.post('/refresh-token', authController.refreshToken);
 router.post('/logout', verifyToken, authController.logout);
 
+// Email Verification
+router.get('/verify-email', authController.verifyEmail);
+router.post('/verify-email', authController.verifyEmail);
+router.post('/resend-verification-email', authController.resendVerificationEmail);
+
+// Password Reset
+router.post('/forgot-password', authController.forgotPassword);
+router.post('/reset-password', authController.resetPassword);
+
 // Google OAuth
 router.get(
   '/google',
@@ -40,3 +49,4 @@ router.get(
 );
 
 module.exports = router;
+
