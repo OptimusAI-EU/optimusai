@@ -12,38 +12,49 @@ interface Subscription {
     lastName: string;
     phone?: string;
   };
-  planName: string;
-  type: string;
+  planName: 'free' | 'starter' | 'professional' | 'enterprise';
+  type: 'RAAS' | 'SAAS';
   billingCycle: 'monthly' | 'annual';
   price: number;
-  status: 'active' | 'paused' | 'cancelled' | 'expired';
   startDate: string;
-  endDate: string;
+  subscriptionDate: string;
   renewalDate: string;
   autoRenew: boolean;
-  features?: string[];
-  usageStats?: any;
+  status: 'cart' | 'active' | 'awaiting_renewal' | 'cancelled';
+  features: any[];
+  usageStats: any;
   createdAt: string;
 }
 
 interface ConfirmModal {
   isOpen: boolean;
-  action: 'cancel' | 'pause' | 'resume' | null;
-  subscription: Subscription | null;
+  subscriptionId: number | null;
+  action: 'pause' | 'resume' | 'cancel' | null;
+}
+
+interface SummaryStats {
+  planTypes: { [key: string]: number };
+  subscriptionStatuses: { [key: string]: number };
+  total: number;
 }
 
 const AdminSubscriptions: React.FC = () => {
-  const { user } = useAuth();
+  const { user: currentUser } = useAuth();
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [filteredSubscriptions, setFilteredSubscriptions] = useState<Subscription[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [filterPlan, setFilterPlan] = useState<string>('all');
+  const [filterPlanType, setFilterPlanType] = useState<string>('all');
   const [expandedSubscription, setExpandedSubscription] = useState<number | null>(null);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal>({
     isOpen: false,
+    subscriptionId: null,
     action: null,
-    subscription: null,
+  });
+  const [summaryStats, setSummaryStats] = useState<SummaryStats>({
+    planTypes: {},
+    subscriptionStatuses: {},
+    total: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +65,8 @@ const AdminSubscriptions: React.FC = () => {
 
   useEffect(() => {
     filterSubscriptions();
-  }, [subscriptions, searchTerm, filterStatus, filterPlan]);
+    calculateStats();
+  }, [subscriptions, searchTerm, filterStatus, filterPlanType]);
 
   const loadSubscriptions = async () => {
     try {
@@ -70,6 +82,27 @@ const AdminSubscriptions: React.FC = () => {
     }
   };
 
+  const calculateStats = () => {
+    const planTypeCounts: { [key: string]: number } = {};
+    const statusCounts: { [key: string]: number } = {};
+
+    subscriptions.forEach((sub) => {
+      // Count by plan type (e.g., "Starter (Monthly)", "Professional (Annual)")
+      const planLabel = `${sub.planName.charAt(0).toUpperCase() + sub.planName.slice(1)} (${sub.billingCycle === 'monthly' ? 'Monthly' : 'Annual'})`;
+      planTypeCounts[planLabel] = (planTypeCounts[planLabel] || 0) + 1;
+
+      // Count by status
+      const statusLabel = sub.status.replace(/_/g, ' ').toUpperCase();
+      statusCounts[statusLabel] = (statusCounts[statusLabel] || 0) + 1;
+    });
+
+    setSummaryStats({
+      planTypes: planTypeCounts,
+      subscriptionStatuses: statusCounts,
+      total: subscriptions.length,
+    });
+  };
+
   const filterSubscriptions = () => {
     let filtered = subscriptions;
 
@@ -77,89 +110,116 @@ const AdminSubscriptions: React.FC = () => {
     if (searchTerm.trim()) {
       const query = searchTerm.toLowerCase();
       filtered = filtered.filter(
-        (s) =>
-          s.user?.email.toLowerCase().includes(query) ||
-          (s.user?.firstName + ' ' + s.user?.lastName).toLowerCase().includes(query) ||
-          s.planName.toLowerCase().includes(query)
+        (sub) =>
+          sub.user?.email.toLowerCase().includes(query) ||
+          (sub.user?.firstName + ' ' + sub.user?.lastName).toLowerCase().includes(query) ||
+          sub.user?.phone?.toLowerCase().includes(query) ||
+          sub.planName.toLowerCase().includes(query)
       );
     }
 
     // Status filter
     if (filterStatus !== 'all') {
-      filtered = filtered.filter((s) => s.status === filterStatus);
+      filtered = filtered.filter((sub) => sub.status === filterStatus);
     }
 
-    // Plan filter
-    if (filterPlan !== 'all') {
-      filtered = filtered.filter((s) => s.planName.toLowerCase() === filterPlan.toLowerCase());
+    // Plan type filter
+    if (filterPlanType !== 'all') {
+      const [planName, billingCycle] = filterPlanType.split('_');
+      filtered = filtered.filter(
+        (sub) =>
+          sub.planName === planName && sub.billingCycle === billingCycle
+      );
     }
 
     setFilteredSubscriptions(filtered);
   };
 
-  const handleStatusAction = (subscription: Subscription, action: 'cancel' | 'pause' | 'resume') => {
+  const handleStatusAction = (subscriptionId: number, action: 'pause' | 'resume' | 'cancel') => {
     setConfirmModal({
       isOpen: true,
+      subscriptionId,
       action,
-      subscription,
     });
   };
 
   const confirmAction = async () => {
-    if (!confirmModal.subscription || !confirmModal.action) return;
+    if (!confirmModal.subscriptionId || !confirmModal.action) return;
 
     try {
-      let newStatus = confirmModal.subscription.status;
-      if (confirmModal.action === 'cancel') {
-        newStatus = 'cancelled';
-      } else if (confirmModal.action === 'pause') {
-        newStatus = 'paused';
-      } else if (confirmModal.action === 'resume') {
-        newStatus = 'active';
+      let newStatus: 'active' | 'cart' | 'awaiting_renewal' | 'cancelled' = 'active';
+
+      switch (confirmModal.action) {
+        case 'cancel':
+          newStatus = 'cancelled';
+          break;
+        case 'pause':
+          // In your system, pause might map to a different status. Using current status for now
+          newStatus = 'active';
+          break;
+        case 'resume':
+          newStatus = 'active';
+          break;
       }
 
-      await updateSubscriptionStatus(confirmModal.subscription.id, { status: newStatus });
+      await updateSubscriptionStatus(confirmModal.subscriptionId, {
+        status: newStatus,
+      });
+
       await loadSubscriptions();
-      setConfirmModal({ isOpen: false, action: null, subscription: null });
+      setConfirmModal({ isOpen: false, subscriptionId: null, action: null });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update subscription');
     }
   };
 
+  const handleSummaryCardClick = (type: 'plan' | 'status', value: string) => {
+    if (type === 'plan') {
+      const [planName, billingCycle] = value.split('_');
+      setFilterPlanType(filterPlanType === `${planName}_${billingCycle}` ? 'all' : `${planName}_${billingCycle}`);
+    } else {
+      const status = value.toLowerCase().replace(/ /g, '_');
+      setFilterStatus(filterStatus === status ? 'all' : status);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'cart':
+        return 'bg-blue-100 text-blue-700';
       case 'active':
         return 'bg-green-100 text-green-700';
-      case 'paused':
+      case 'awaiting_renewal':
         return 'bg-yellow-100 text-yellow-700';
       case 'cancelled':
         return 'bg-red-100 text-red-700';
-      case 'expired':
-        return 'bg-gray-100 text-gray-700';
       default:
         return 'bg-gray-100 text-gray-700';
     }
   };
 
-  const getPlanColor = (plan: string) => {
-    switch (plan?.toLowerCase()) {
-      case 'free':
-        return 'bg-blue-100 text-blue-700';
-      case 'starter':
-        return 'bg-purple-100 text-purple-700';
-      case 'professional':
-        return 'bg-indigo-100 text-indigo-700';
-      case 'enterprise':
-        return 'bg-rose-100 text-rose-700';
-      default:
-        return 'bg-gray-100 text-gray-700';
-    }
+  const getPlanTypeColor = (planName: string) => {
+    const colors: { [key: string]: string } = {
+      'free': 'bg-gray-100 text-gray-700',
+      'starter': 'bg-blue-100 text-blue-700',
+      'professional': 'bg-purple-100 text-purple-700',
+      'enterprise': 'bg-red-100 text-red-700',
+    };
+    return colors[planName] || 'bg-gray-100 text-gray-700';
   };
 
-  const getUniquePlans = () => {
-    const plans = new Set(subscriptions.map((s) => s.planName.toLowerCase()));
-    return Array.from(plans);
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
+
+  const formatStatusDisplay = (status: string) => {
+    return status.replace(/_/g, ' ').toUpperCase();
+  };
+
+  const canPause = (status: string) => status === 'active';
+  const canResume = (status: string) => status === 'active'; // Your logic might differ
+  const canCancel = (status: string) => status === 'active' || status === 'awaiting_renewal';
 
   if (loading) {
     return (
@@ -173,7 +233,7 @@ const AdminSubscriptions: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-gray-900">Subscriptions Management</h2>
-        <p className="text-gray-600 mt-1">Manage customer subscriptions and plans</p>
+        <p className="text-gray-600 mt-1">Manage RAAS and SAAS subscriptions</p>
       </div>
 
       {error && (
@@ -182,29 +242,52 @@ const AdminSubscriptions: React.FC = () => {
         </div>
       )}
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <p className="text-gray-600 text-sm font-medium">Total Subscriptions</p>
-          <p className="text-3xl font-bold text-gray-900 mt-2">{subscriptions.length}</p>
+      {/* Summary Statistics - Plan Types */}
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">Plan Types</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-x-auto">
+          {Object.entries(summaryStats.planTypes).map(([planType, count]) => (
+            <button
+              key={planType}
+              onClick={() => {
+                const [plan, cycle] = planType.split(' (');
+                const billingCycle = cycle.slice(0, -1).toLowerCase();
+                const planName = plan.toLowerCase();
+                handleSummaryCardClick('plan', `${planName}_${billingCycle === 'monthly' ? 'monthly' : 'annual'}`);
+              }}
+              className={`p-6 rounded-lg border-2 transition cursor-pointer text-left ${
+                filterPlanType === `${planType.split(' ')[0].toLowerCase()}_${planType.includes('Annual') ? 'annual' : 'monthly'}`
+                  ? 'border-red-500 bg-red-50'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div className="text-sm font-medium text-gray-600">{planType}</div>
+              <div className="text-3xl font-bold text-gray-900 mt-2">{count}</div>
+              <div className="text-xs text-gray-500 mt-1">Click to filter</div>
+            </button>
+          ))}
         </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <p className="text-gray-600 text-sm font-medium">Active</p>
-          <p className="text-3xl font-bold text-green-600 mt-2">
-            {subscriptions.filter((s) => s.status === 'active').length}
-          </p>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <p className="text-gray-600 text-sm font-medium">Paused</p>
-          <p className="text-3xl font-bold text-yellow-600 mt-2">
-            {subscriptions.filter((s) => s.status === 'paused').length}
-          </p>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <p className="text-gray-600 text-sm font-medium">Cancelled</p>
-          <p className="text-3xl font-bold text-red-600 mt-2">
-            {subscriptions.filter((s) => s.status === 'cancelled').length}
-          </p>
+      </div>
+
+      {/* Summary Statistics - Subscription Statuses */}
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">Subscription Status Distribution</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {Object.entries(summaryStats.subscriptionStatuses).map(([status, count]) => (
+            <button
+              key={status}
+              onClick={() => handleSummaryCardClick('status', status)}
+              className={`p-6 rounded-lg border-2 transition cursor-pointer ${
+                filterStatus === status.toLowerCase().replace(/ /g, '_')
+                  ? 'border-red-500 bg-red-50'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div className="text-sm font-medium text-gray-600">{status}</div>
+              <div className="text-3xl font-bold text-gray-900 mt-2">{count}</div>
+              <div className="text-xs text-gray-500 mt-1">Click to filter</div>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -215,7 +298,7 @@ const AdminSubscriptions: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <input
             type="text"
-            placeholder="Search by email, name, or plan..."
+            placeholder="Search by email, name, phone, or plan..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -227,21 +310,24 @@ const AdminSubscriptions: React.FC = () => {
             className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
           >
             <option value="all">All Status</option>
+            <option value="cart">Cart</option>
             <option value="active">Active</option>
-            <option value="paused">Paused</option>
+            <option value="awaiting_renewal">Awaiting Renewal</option>
             <option value="cancelled">Cancelled</option>
-            <option value="expired">Expired</option>
           </select>
 
           <select
-            value={filterPlan}
-            onChange={(e) => setFilterPlan(e.target.value)}
+            value={filterPlanType}
+            onChange={(e) => setFilterPlanType(e.target.value)}
             className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
           >
             <option value="all">All Plans</option>
-            {getUniquePlans().map((plan) => (
-              <option key={plan} value={plan}>
-                {plan.charAt(0).toUpperCase() + plan.slice(1)}
+            {Object.keys(summaryStats.planTypes).map((planType) => (
+              <option
+                key={planType}
+                value={`${planType.split(' ')[0].toLowerCase()}_${planType.includes('Annual') ? 'annual' : 'monthly'}`}
+              >
+                {planType}
               </option>
             ))}
           </select>
@@ -260,6 +346,7 @@ const AdminSubscriptions: React.FC = () => {
               <tr>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Customer</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Email</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Phone</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Plan</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Type</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Billing Cycle</th>
@@ -272,137 +359,133 @@ const AdminSubscriptions: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredSubscriptions.length > 0 ? (
-                filteredSubscriptions.map((subscription) => (
-                  <React.Fragment key={subscription.id}>
+                filteredSubscriptions.map((sub) => (
+                  <React.Fragment key={sub.id}>
                     <tr className="hover:bg-gray-50">
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                        {subscription.user?.firstName} {subscription.user?.lastName}
+                      <td className="px-6 py-4 text-sm text-gray-700">
+                        {sub.user?.firstName} {sub.user?.lastName}
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{subscription.user?.email}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{sub.user?.email}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{sub.user?.phone || 'N/A'}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700 font-medium">
+                        {sub.planName.charAt(0).toUpperCase() + sub.planName.slice(1)}
+                      </td>
                       <td className="px-6 py-4 text-sm">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getPlanColor(subscription.planName)}`}>
-                          {subscription.planName.charAt(0).toUpperCase() + subscription.planName.slice(1)}
+                        <span className="px-2 py-1 rounded text-xs font-semibold bg-indigo-100 text-indigo-700">
+                          {sub.type}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-700 font-medium">{subscription.type}</td>
-                      <td className="px-6 py-4 text-sm text-gray-700 capitalize">{subscription.billingCycle}</td>
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900">${subscription.price.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700 capitalize">
+                        {sub.billingCycle}
+                      </td>
+                      <td className="px-6 py-4 text-sm font-medium text-red-600">${sub.price.toFixed(2)}</td>
                       <td className="px-6 py-4 text-sm">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(subscription.status)}`}>
-                          {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(sub.status)}`}>
+                          {formatStatusDisplay(sub.status)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">
-                        {new Date(subscription.renewalDate).toLocaleDateString()}
+                        {formatDate(sub.renewalDate)}
                       </td>
                       <td className="px-6 py-4 text-sm">
-                        <span className={subscription.autoRenew ? 'text-green-700 font-medium' : 'text-gray-700'}>
-                          {subscription.autoRenew ? '✓ Yes' : 'No'}
+                        <span className={`text-xs font-semibold px-2 py-1 rounded ${sub.autoRenew ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                          {sub.autoRenew ? 'Yes' : 'No'}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <button
-                          onClick={() => setExpandedSubscription(expandedSubscription === subscription.id ? null : subscription.id)}
+                          onClick={() => setExpandedSubscription(expandedSubscription === sub.id ? null : sub.id)}
                           className="text-blue-600 hover:text-blue-800 font-medium"
                         >
-                          {expandedSubscription === subscription.id ? 'Hide' : 'View'}
+                          {expandedSubscription === sub.id ? 'Hide' : 'View'}
                         </button>
                       </td>
                     </tr>
 
                     {/* Expanded Details Row */}
-                    {expandedSubscription === subscription.id && (
+                    {expandedSubscription === sub.id && (
                       <tr className="bg-gray-50">
-                        <td colSpan={10} className="px-6 py-6">
+                        <td colSpan={11} className="px-6 py-6">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                             {/* Subscription Details */}
-                            <div>
-                              <h4 className="font-semibold text-gray-900 mb-4">Subscription Details</h4>
-                              <div className="bg-white rounded p-4 border border-gray-200 space-y-3 text-sm">
-                                <div>
-                                  <label className="text-xs font-semibold text-gray-600 block mb-1">Plan Name</label>
-                                  <p className="text-gray-900 font-medium">{subscription.planName}</p>
+                            <div className="space-y-6">
+                              <div>
+                                <h4 className="font-semibold text-gray-900 mb-3">Subscription Details</h4>
+                                <div className="bg-white rounded p-4 border border-gray-200 space-y-3 text-sm">
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Plan</p>
+                                    <p className="text-gray-900 font-medium capitalize">{sub.planName}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Type</p>
+                                    <p className="text-gray-900 font-medium">{sub.type}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Billing Cycle</p>
+                                    <p className="text-gray-900 font-medium capitalize">{sub.billingCycle}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Price</p>
+                                    <p className="text-gray-900 font-medium text-lg text-red-600">${sub.price.toFixed(2)}</p>
+                                  </div>
                                 </div>
-                                <div>
-                                  <label className="text-xs font-semibold text-gray-600 block mb-1">Subscription Type</label>
-                                  <p className="text-gray-900 font-medium">{subscription.type}</p>
-                                </div>
-                                <div>
-                                  <label className="text-xs font-semibold text-gray-600 block mb-1">Price</label>
-                                  <p className="text-gray-900 font-medium">${subscription.price.toFixed(2)} per {subscription.billingCycle}</p>
-                                </div>
-                                <div>
-                                  <label className="text-xs font-semibold text-gray-600 block mb-1">Start Date</label>
-                                  <p className="text-gray-900">{new Date(subscription.startDate).toLocaleDateString()}</p>
-                                </div>
-                                <div>
-                                  <label className="text-xs font-semibold text-gray-600 block mb-1">End Date</label>
-                                  <p className="text-gray-900">{new Date(subscription.endDate).toLocaleDateString()}</p>
-                                </div>
-                                <div>
-                                  <label className="text-xs font-semibold text-gray-600 block mb-1">Auto Renew</label>
-                                  <p className="text-gray-900 font-medium">{subscription.autoRenew ? 'Enabled' : 'Disabled'}</p>
+                              </div>
+
+                              <div>
+                                <h4 className="font-semibold text-gray-900 mb-3">Subscription Dates</h4>
+                                <div className="bg-white rounded p-4 border border-gray-200 space-y-3 text-sm">
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Subscription Date</p>
+                                    <p className="text-gray-900">{formatDate(sub.subscriptionDate)}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Renewal Date</p>
+                                    <p className="text-gray-900">{formatDate(sub.renewalDate)}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Auto Renew</p>
+                                    <p className={`font-medium ${sub.autoRenew ? 'text-green-600' : 'text-red-600'}`}>
+                                      {sub.autoRenew ? 'Enabled' : 'Disabled'}
+                                    </p>
+                                  </div>
                                 </div>
                               </div>
                             </div>
 
-                            {/* Customer & Actions */}
+                            {/* Customer & Features */}
                             <div className="space-y-6">
                               <div>
-                                <h4 className="font-semibold text-gray-900 mb-3">Customer Information</h4>
+                                <h4 className="font-semibold text-gray-900 mb-3">Customer Info</h4>
                                 <div className="bg-white rounded p-4 border border-gray-200 space-y-2 text-sm">
                                   <div>
-                                    <label className="text-xs font-semibold text-gray-600">Name</label>
-                                    <p className="text-gray-900 font-medium">{subscription.user?.firstName} {subscription.user?.lastName}</p>
+                                    <p className="text-xs font-medium text-gray-600">Name</p>
+                                    <p className="text-gray-900 font-medium">{sub.user?.firstName} {sub.user?.lastName}</p>
                                   </div>
                                   <div>
-                                    <label className="text-xs font-semibold text-gray-600">Email</label>
-                                    <p className="text-gray-900">{subscription.user?.email}</p>
+                                    <p className="text-xs font-medium text-gray-600">Email</p>
+                                    <p className="text-gray-900">{sub.user?.email}</p>
                                   </div>
-                                  {subscription.user?.phone && (
-                                    <div>
-                                      <label className="text-xs font-semibold text-gray-600">Phone</label>
-                                      <p className="text-gray-900">{subscription.user.phone}</p>
-                                    </div>
-                                  )}
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Phone</p>
+                                    <p className="text-gray-900">{sub.user?.phone || 'Not provided'}</p>
+                                  </div>
                                 </div>
                               </div>
 
                               <div>
                                 <h4 className="font-semibold text-gray-900 mb-3">Management</h4>
-                                <div className="flex flex-col gap-2">
-                                  {subscription.status === 'active' && (
-                                    <>
+                                <div className="bg-white rounded p-4 border border-gray-200 space-y-2">
+                                  <p className="text-xs font-medium text-gray-600 mb-3">Current Status: <span className="text-gray-900 font-medium">{formatStatusDisplay(sub.status)}</span></p>
+                                  <div className="space-y-2">
+                                    {canCancel(sub.status) && (
                                       <button
-                                        onClick={() => handleStatusAction(subscription, 'pause')}
-                                        className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition font-medium text-sm"
-                                      >
-                                        Pause Subscription
-                                      </button>
-                                      <button
-                                        onClick={() => handleStatusAction(subscription, 'cancel')}
-                                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium text-sm"
+                                        onClick={() => handleStatusAction(sub.id, 'cancel')}
+                                        className="w-full px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition font-semibold text-sm"
                                       >
                                         Cancel Subscription
                                       </button>
-                                    </>
-                                  )}
-                                  {subscription.status === 'paused' && (
-                                    <>
-                                      <button
-                                        onClick={() => handleStatusAction(subscription, 'resume')}
-                                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium text-sm"
-                                      >
-                                        Resume Subscription
-                                      </button>
-                                      <button
-                                        onClick={() => handleStatusAction(subscription, 'cancel')}
-                                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium text-sm"
-                                      >
-                                        Cancel Subscription
-                                      </button>
-                                    </>
-                                  )}
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -414,7 +497,7 @@ const AdminSubscriptions: React.FC = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={10} className="px-6 py-8 text-center text-gray-600">
+                  <td colSpan={11} className="px-6 py-8 text-center text-gray-600">
                     No subscriptions found
                   </td>
                 </tr>
@@ -425,22 +508,16 @@ const AdminSubscriptions: React.FC = () => {
       </div>
 
       {/* Confirmation Modal */}
-      {confirmModal.isOpen && confirmModal.subscription && (
+      {confirmModal.isOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 max-w-md w-full">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Confirm Action</h2>
             <p className="text-gray-600 mb-6">
-              Are you sure you want to{' '}
-              <span className="font-semibold">
-                {confirmModal.action === 'cancel' && 'cancel'}
-                {confirmModal.action === 'pause' && 'pause'}
-                {confirmModal.action === 'resume' && 'resume'}
-              </span>{' '}
-              the subscription for <span className="font-semibold">{confirmModal.subscription.user?.email}</span>?
+              Are you sure you want to <strong>{confirmModal.action}</strong> this subscription?
             </p>
             <div className="flex gap-4">
               <button
-                onClick={() => setConfirmModal({ isOpen: false, action: null, subscription: null })}
+                onClick={() => setConfirmModal({ isOpen: false, subscriptionId: null, action: null })}
                 className="flex-1 px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 transition font-semibold"
               >
                 Cancel

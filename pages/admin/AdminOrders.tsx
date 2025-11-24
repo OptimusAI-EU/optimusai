@@ -19,8 +19,9 @@ interface Order {
   tax: number;
   total: number;
   paymentMethod: string;
-  orderStatus: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  orderStatus: 'cart' | 'awaiting_shipping' | 'shipped' | 'delivered' | 'cancelled';
   paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded';
+  productType: 'robot' | 'odin_subscription';
   shippingAddress?: any;
   billingAddress?: any;
   createdAt: string;
@@ -30,7 +31,11 @@ interface ConfirmModal {
   isOpen: boolean;
   orderId: number | null;
   newOrderStatus: string | null;
-  newPaymentStatus: string | null;
+}
+
+interface SummaryStats {
+  productTypes: { [key: string]: number };
+  orderStatuses: { [key: string]: number };
 }
 
 const AdminOrders: React.FC = () => {
@@ -38,14 +43,17 @@ const AdminOrders: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [productTypeFilter, setProductTypeFilter] = useState<string>('all');
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>('all');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('all');
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [confirmModal, setConfirmModal] = useState<ConfirmModal>({
     isOpen: false,
     orderId: null,
     newOrderStatus: null,
-    newPaymentStatus: null,
+  });
+  const [summaryStats, setSummaryStats] = useState<SummaryStats>({
+    productTypes: {},
+    orderStatuses: {},
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +64,8 @@ const AdminOrders: React.FC = () => {
 
   useEffect(() => {
     filterOrders();
-  }, [orders, searchQuery, orderStatusFilter, paymentStatusFilter]);
+    calculateStats();
+  }, [orders, searchQuery, productTypeFilter, orderStatusFilter]);
 
   const loadOrders = async () => {
     try {
@@ -72,6 +81,27 @@ const AdminOrders: React.FC = () => {
     }
   };
 
+  const calculateStats = () => {
+    const productTypeCounts: { [key: string]: number } = {};
+    const orderStatusCounts: { [key: string]: number } = {};
+
+    orders.forEach((order) => {
+      // Count by product type
+      const productType = order.productType || 'robot';
+      const productLabel = productType === 'robot' ? 'Robots' : 'ODIN Subscriptions';
+      productTypeCounts[productLabel] = (productTypeCounts[productLabel] || 0) + 1;
+
+      // Count by order status
+      const statusLabel = order.orderStatus.replace(/_/g, ' ').toUpperCase();
+      orderStatusCounts[statusLabel] = (orderStatusCounts[statusLabel] || 0) + 1;
+    });
+
+    setSummaryStats({
+      productTypes: productTypeCounts,
+      orderStatuses: orderStatusCounts,
+    });
+  };
+
   const filterOrders = () => {
     let filtered = orders;
 
@@ -82,56 +112,64 @@ const AdminOrders: React.FC = () => {
         (o) =>
           o.orderNumber.toLowerCase().includes(query) ||
           o.user?.email.toLowerCase().includes(query) ||
-          (o.user?.firstName + ' ' + o.user?.lastName).toLowerCase().includes(query)
+          (o.user?.firstName + ' ' + o.user?.lastName).toLowerCase().includes(query) ||
+          o.user?.phone?.toLowerCase().includes(query)
       );
     }
 
-    // Status filters
+    // Product type filter
+    if (productTypeFilter !== 'all') {
+      filtered = filtered.filter((o) => o.productType === productTypeFilter);
+    }
+
+    // Order status filter
     if (orderStatusFilter !== 'all') {
       filtered = filtered.filter((o) => o.orderStatus === orderStatusFilter);
-    }
-    if (paymentStatusFilter !== 'all') {
-      filtered = filtered.filter((o) => o.paymentStatus === paymentStatusFilter);
     }
 
     setFilteredOrders(filtered);
   };
 
-  const handleStatusChange = (orderId: number, newOrderStatus?: string, newPaymentStatus?: string) => {
-    const order = orders.find((o) => o.id === orderId);
-    if (!order) return;
-
+  const handleStatusChange = (orderId: number, newOrderStatus: string) => {
     setConfirmModal({
       isOpen: true,
       orderId,
-      newOrderStatus: newOrderStatus || order.orderStatus,
-      newPaymentStatus: newPaymentStatus || order.paymentStatus,
+      newOrderStatus,
     });
   };
 
   const confirmStatusChange = async () => {
-    if (!confirmModal.orderId || (!confirmModal.newOrderStatus && !confirmModal.newPaymentStatus)) return;
+    if (!confirmModal.orderId || !confirmModal.newOrderStatus) return;
 
     try {
       await updateOrderStatus(confirmModal.orderId, {
         orderStatus: confirmModal.newOrderStatus,
-        paymentStatus: confirmModal.newPaymentStatus,
       });
 
       // Reload orders
       await loadOrders();
-      setConfirmModal({ isOpen: false, orderId: null, newOrderStatus: null, newPaymentStatus: null });
+      setConfirmModal({ isOpen: false, orderId: null, newOrderStatus: null });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update order status');
     }
   };
 
+  const handleSummaryCardClick = (type: 'productType' | 'status', value: string) => {
+    if (type === 'productType') {
+      const productType = value === 'Robots' ? 'robot' : 'odin_subscription';
+      setProductTypeFilter(productTypeFilter === productType ? 'all' : productType);
+    } else {
+      const status = value.toLowerCase().replace(/ /g, '_');
+      setOrderStatusFilter(orderStatusFilter === status ? 'all' : status);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-700';
-      case 'processing':
+      case 'cart':
         return 'bg-blue-100 text-blue-700';
+      case 'awaiting_shipping':
+        return 'bg-yellow-100 text-yellow-700';
       case 'shipped':
         return 'bg-purple-100 text-purple-700';
       case 'delivered':
@@ -143,24 +181,17 @@ const AdminOrders: React.FC = () => {
     }
   };
 
-  const getPaymentStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-700';
-      case 'completed':
-        return 'bg-green-100 text-green-700';
-      case 'failed':
-        return 'bg-red-100 text-red-700';
-      case 'refunded':
-        return 'bg-orange-100 text-orange-700';
-      default:
-        return 'bg-gray-100 text-gray-700';
-    }
+  const getProductTypeColor = (type: string) => {
+    return type === 'robot' ? 'bg-indigo-100 text-indigo-700' : 'bg-pink-100 text-pink-700';
   };
 
   const getItemsDescription = (items: any[]) => {
     if (!items || items.length === 0) return 'No items';
     return items.map(item => item.productName || item.name || 'Item').join(', ');
+  };
+
+  const formatStatusDisplay = (status: string) => {
+    return status.replace(/_/g, ' ').toUpperCase();
   };
 
   if (loading) {
@@ -184,6 +215,53 @@ const AdminOrders: React.FC = () => {
         </div>
       )}
 
+      {/* Summary Statistics - Product Types */}
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">Product Types</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {Object.entries(summaryStats.productTypes).map(([productType, count]) => (
+            <button
+              key={productType}
+              onClick={() => handleSummaryCardClick('productType', productType)}
+              className={`p-6 rounded-lg border-2 transition cursor-pointer ${
+                productTypeFilter === (productType === 'Robots' ? 'robot' : 'odin_subscription')
+                  ? 'border-red-500 bg-red-50'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div className="text-sm font-medium text-gray-600">{productType}</div>
+              <div className="text-3xl font-bold text-gray-900 mt-2">{count}</div>
+              <div className="text-xs text-gray-500 mt-1">Click to filter</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary Statistics - Order Statuses */}
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-3">Order Status Distribution</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {Object.entries(summaryStats.orderStatuses).map(([status, count]) => {
+            const statusKey = status.toLowerCase().replace(/ /g, '_');
+            return (
+              <button
+                key={status}
+                onClick={() => handleSummaryCardClick('status', status)}
+                className={`p-6 rounded-lg border-2 transition cursor-pointer ${
+                  orderStatusFilter === statusKey
+                    ? 'border-red-500 bg-red-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="text-sm font-medium text-gray-600">{status}</div>
+                <div className="text-3xl font-bold text-gray-900 mt-2">{count}</div>
+                <div className="text-xs text-gray-500 mt-1">Click to filter</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Filters */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Filters & Search</h3>
@@ -191,11 +269,21 @@ const AdminOrders: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <input
             type="text"
-            placeholder="Search by order ID, email, or name..."
+            placeholder="Search by order ID, email, name, or phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
           />
+
+          <select
+            value={productTypeFilter}
+            onChange={(e) => setProductTypeFilter(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+          >
+            <option value="all">All Product Types</option>
+            <option value="robot">Robots</option>
+            <option value="odin_subscription">ODIN Subscriptions</option>
+          </select>
 
           <select
             value={orderStatusFilter}
@@ -203,23 +291,11 @@ const AdminOrders: React.FC = () => {
             className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
           >
             <option value="all">All Order Status</option>
-            <option value="pending">Pending</option>
-            <option value="processing">Processing</option>
+            <option value="cart">Cart</option>
+            <option value="awaiting_shipping">Awaiting Shipping</option>
             <option value="shipped">Shipped</option>
             <option value="delivered">Delivered</option>
             <option value="cancelled">Cancelled</option>
-          </select>
-
-          <select
-            value={paymentStatusFilter}
-            onChange={(e) => setPaymentStatusFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
-          >
-            <option value="all">All Payment Status</option>
-            <option value="pending">Pending</option>
-            <option value="completed">Completed</option>
-            <option value="failed">Failed</option>
-            <option value="refunded">Refunded</option>
           </select>
 
           <div className="text-sm text-gray-600 flex items-center justify-end">
@@ -237,11 +313,11 @@ const AdminOrders: React.FC = () => {
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Order #</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Customer</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Email</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Phone</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Product Type</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Items</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Payment Method</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Total</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Order Status</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Payment Status</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Date</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Actions</th>
               </tr>
@@ -256,21 +332,19 @@ const AdminOrders: React.FC = () => {
                         {order.user?.firstName} {order.user?.lastName}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">{order.user?.email}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{order.user?.phone || 'N/A'}</td>
+                      <td className="px-6 py-4 text-sm">
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getProductTypeColor(order.productType)}`}>
+                          {order.productType === 'robot' ? 'Robot' : 'ODIN'}
+                        </span>
+                      </td>
                       <td className="px-6 py-4 text-sm text-gray-700 max-w-xs truncate">
                         {getItemsDescription(order.items)}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-700 capitalize">
-                        {order.paymentMethod?.replace(/_/g, ' ')}
                       </td>
                       <td className="px-6 py-4 text-sm font-medium text-red-600">${order.total.toFixed(2)}</td>
                       <td className="px-6 py-4 text-sm">
                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.orderStatus)}`}>
-                          {order.orderStatus.charAt(0).toUpperCase() + order.orderStatus.slice(1)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getPaymentStatusColor(order.paymentStatus)}`}>
-                          {order.paymentStatus.charAt(0).toUpperCase() + order.paymentStatus.slice(1)}
+                          {formatStatusDisplay(order.orderStatus)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">
@@ -333,6 +407,24 @@ const AdminOrders: React.FC = () => {
                             {/* Shipping & Payment Details */}
                             <div className="space-y-6">
                               <div>
+                                <h4 className="font-semibold text-gray-900 mb-3">Customer Info</h4>
+                                <div className="bg-white rounded p-4 border border-gray-200 space-y-2 text-sm">
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Name</p>
+                                    <p className="text-gray-900 font-medium">{order.user?.firstName} {order.user?.lastName}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Email</p>
+                                    <p className="text-gray-900">{order.user?.email}</p>
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-medium text-gray-600">Phone</p>
+                                    <p className="text-gray-900">{order.user?.phone || 'Not provided'}</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
                                 <h4 className="font-semibold text-gray-900 mb-3">Shipping Address</h4>
                                 {order.shippingAddress ? (
                                   <div className="bg-white rounded p-4 border border-gray-200 space-y-1 text-sm">
@@ -353,39 +445,19 @@ const AdminOrders: React.FC = () => {
                               </div>
 
                               <div>
-                                <h4 className="font-semibold text-gray-900 mb-3">Payment & Status</h4>
-                                <div className="bg-white rounded p-4 border border-gray-200 space-y-4">
-                                  <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-2">Payment Method</label>
-                                    <p className="text-sm text-gray-900 capitalize font-medium">{order.paymentMethod?.replace(/_/g, ' ')}</p>
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Order Status</label>
-                                    <select
-                                      value={order.orderStatus}
-                                      onChange={(e) => handleStatusChange(order.id, e.target.value)}
-                                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-600 focus:border-transparent w-full text-sm"
-                                    >
-                                      <option value="pending">Pending</option>
-                                      <option value="processing">Processing</option>
-                                      <option value="shipped">Shipped</option>
-                                      <option value="delivered">Delivered</option>
-                                      <option value="cancelled">Cancelled</option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
-                                    <select
-                                      value={order.paymentStatus}
-                                      onChange={(e) => handleStatusChange(order.id, undefined, e.target.value)}
-                                      className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-600 focus:border-transparent w-full text-sm"
-                                    >
-                                      <option value="pending">Pending</option>
-                                      <option value="completed">Completed</option>
-                                      <option value="failed">Failed</option>
-                                      <option value="refunded">Refunded</option>
-                                    </select>
-                                  </div>
+                                <h4 className="font-semibold text-gray-900 mb-3">Order Status</h4>
+                                <div className="bg-white rounded p-4 border border-gray-200">
+                                  <select
+                                    value={order.orderStatus}
+                                    onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-600 focus:border-transparent w-full text-sm"
+                                  >
+                                    <option value="cart">Cart</option>
+                                    <option value="awaiting_shipping">Awaiting Shipping</option>
+                                    <option value="shipped">Shipped</option>
+                                    <option value="delivered">Delivered</option>
+                                    <option value="cancelled">Cancelled</option>
+                                  </select>
                                 </div>
                               </div>
                             </div>
@@ -412,10 +484,10 @@ const AdminOrders: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 max-w-md w-full">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Confirm Status Change</h2>
-            <p className="text-gray-600 mb-6">Are you sure you want to update the order status?</p>
+            <p className="text-gray-600 mb-6">Are you sure you want to update the order status to <strong>{formatStatusDisplay(confirmModal.newOrderStatus || '')}</strong>?</p>
             <div className="flex gap-4">
               <button
-                onClick={() => setConfirmModal({ isOpen: false, orderId: null, newOrderStatus: null, newPaymentStatus: null })}
+                onClick={() => setConfirmModal({ isOpen: false, orderId: null, newOrderStatus: null })}
                 className="flex-1 px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 transition font-semibold"
               >
                 Cancel

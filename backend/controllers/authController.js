@@ -199,23 +199,196 @@ const fetchLocationFromIp = async (ipAddress) => {
   }
 };
 
-// Create user session record
+// Detect VPN status using IPQualityScore
+const detectVPNStatus = async (ipAddress) => {
+  try {
+    // Check if this is a localhost/private IP - skip IPQS for these
+    const isLocalhost = ipAddress === '::1' || ipAddress === '127.0.0.1' || 
+                       ipAddress.startsWith('192.168.') || 
+                       ipAddress.startsWith('10.') ||
+                       ipAddress.startsWith('172.');
+
+    if (isLocalhost) {
+      console.log(`⚠️  Localhost/Private IP detected (${ipAddress}), skipping IPQS API`);
+      return { isVPN: false, provider: null, fraudScore: 0 };
+    }
+
+    // Check if API key is configured
+    if (!process.env.IPQS_API_KEY) {
+      console.warn('⚠️ IPQS_API_KEY not configured, skipping VPN detection');
+      return { isVPN: false, provider: null, fraudScore: 0 };
+    }
+
+    console.log(`🔍 Calling IPQS API for IP: ${ipAddress}`);
+
+    const response = await axios.get(
+      'https://ipqualityscore.com/api/json/ip',
+      {
+        params: {
+          ip: ipAddress,
+          strictness: 1,
+          format: 'json',
+        },
+        headers: {
+          'IPQS-KEY': process.env.IPQS_API_KEY,
+        },
+        timeout: 5000,
+      }
+    );
+
+    console.log(`✅ IPQS Response:`, {
+      is_vpn: response.data.is_vpn,
+      is_proxy: response.data.is_proxy,
+      fraud_score: response.data.fraud_score,
+      host: response.data.host,
+    });
+
+    const vpnProvider = identifyVPNProvider(response.data.host || '');
+
+    const result = {
+      isVPN: response.data.is_vpn === true, // Explicitly convert to boolean
+      isProxy: response.data.is_proxy === true,
+      isTor: response.data.is_tor === true,
+      provider: vpnProvider || null,
+      fraudScore: response.data.fraud_score || 0,
+      confidence: calculateVPNConfidence(response.data),
+    };
+
+    console.log(`📊 VPN Detection Result:`, result);
+    return result;
+  } catch (error) {
+    console.error('❌ Error detecting VPN:', error.message);
+    console.error('Error details:', error.response?.data || error);
+    return { isVPN: false, provider: null, fraudScore: 0 };
+  }
+};
+
+// Identify VPN provider from hostname
+const identifyVPNProvider = (hostName) => {
+  const providers = {
+    'expressvpn': 'ExpressVPN',
+    'nordvpn': 'NordVPN',
+    'protonvpn': 'ProtonVPN',
+    'surfshark': 'Surfshark',
+    'windscribe': 'Windscribe',
+    'cyberghost': 'CyberGhost',
+    'purevpn': 'PureVPN',
+    'hotspotshield': 'HotspotShield',
+  };
+
+  const lowerHost = hostName.toLowerCase();
+  for (const [key, name] of Object.entries(providers)) {
+    if (lowerHost.includes(key)) {
+      return name;
+    }
+  }
+
+  return null;
+};
+
+// Calculate VPN detection confidence
+const calculateVPNConfidence = (ipqsData) => {
+  let score = 0;
+  if (ipqsData.is_vpn) score += 40;
+  if (ipqsData.is_proxy) score += 30;
+  if (ipqsData.is_crawler) score += 20;
+  if (ipqsData.fraud_score > 75) score += 10;
+  return Math.min(score, 100);
+};
+
+// Create user session record with VPN detection
 const createUserSession = async (userId, req) => {
   try {
-    const { UserSession } = require('../models');
+    const { UserSession, User } = require('../models');
     const ipAddress = getClientIp(req);
     
     // Fetch location data
     const location = await fetchLocationFromIp(ipAddress);
     
-    const session = await UserSession.create({
+    // Detect VPN status
+    const vpnDetection = await detectVPNStatus(ipAddress);
+    
+    // Determine if this is a VPN location or actual location
+    let sessionData = {
       userId,
       ipAddress,
-      location,
       userAgent: req.headers['user-agent'] || 'unknown',
       loginTime: new Date(),
       isActive: true,
+      isVPNDetected: vpnDetection.isVPN,
+      vpnProvider: vpnDetection.provider,
+      vpnDetectionScore: vpnDetection.fraudScore,
+    };
+
+    if (vpnDetection.isVPN) {
+      // VPN is active - store as VPN location
+      sessionData.vpnLocation = location;
+      sessionData.vpnDetectionHistory = [{
+        timestamp: new Date(),
+        ip: ipAddress,
+        isVPN: true,
+        provider: vpnDetection.provider,
+        method: 'login',
+        fraudScore: vpnDetection.fraudScore,
+      }];
+    } else {
+      // No VPN - store as real location
+      sessionData.realLocation = location;
+      sessionData.realIPConfirmedAt = new Date();
+      sessionData.vpnDetectionHistory = [{
+        timestamp: new Date(),
+        ip: ipAddress,
+        isVPN: false,
+        provider: null,
+        method: 'login',
+        fraudScore: vpnDetection.fraudScore,
+      }];
+    }
+
+    // Also store location in location field for backward compatibility
+    sessionData.location = location;
+
+    const session = await UserSession.create(sessionData);
+
+    // Update user's last location info
+    const updateData = {
+      lastIPAddress: ipAddress,
+      lastISP: location.isp || 'Unknown',
+    };
+
+    if (vpnDetection.isVPN) {
+      updateData.lastVPNLocation = {
+        ...location,
+        detectedAt: new Date(),
+        provider: vpnDetection.provider,
+      };
+      updateData.isVPNCurrentlyDetected = true;
+    } else {
+      updateData.lastActualLocation = {
+        ...location,
+        confirmedAt: new Date(),
+      };
+      updateData.isVPNCurrentlyDetected = false;
+    }
+
+    // Add to location history
+    const user = await User.findByPk(userId);
+    const locationHistory = user.locationHistory || [];
+    locationHistory.push({
+      type: vpnDetection.isVPN ? 'vpn' : 'actual',
+      location,
+      ip: ipAddress,
+      isp: location.isp,
+      timestamp: new Date(),
+      provider: vpnDetection.provider,
     });
+
+    updateData.locationHistory = locationHistory.slice(-50); // Keep last 50
+
+    await User.update(updateData, { where: { id: userId } });
+
+    console.log(`✅ Session created for user ${userId}`);
+    console.log(`   IP: ${ipAddress}, VPN: ${vpnDetection.isVPN}, Provider: ${vpnDetection.provider || 'None'}`);
 
     return session;
   } catch (error) {
@@ -503,17 +676,20 @@ exports.refreshToken = async (req, res, next) => {
 exports.logout = async (req, res, next) => {
   try {
     const userId = req.user?.id || req.userId;
+    console.log(`👤 Logout initiated for user: ${userId}`);
 
     if (userId) {
       try {
         // Mark session as inactive
         const { UserSession } = require('../models');
-        await UserSession.update(
+        const result = await UserSession.update(
           { isActive: false, logoutTime: new Date() },
           { where: { userId, isActive: true } }
         );
+        console.log(`✅ Session update result:`, result);
+        console.log(`   Updated ${result[0]} sessions to inactive`);
       } catch (error) {
-        console.error('Error updating user session:', error);
+        console.error('❌ Error updating user session:', error);
       }
     }
 
@@ -526,6 +702,139 @@ exports.logout = async (req, res, next) => {
       message: 'Logged out successfully',
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+// Detect VPN/IP changes for active sessions
+exports.detectVPNChange = async (req, res, next) => {
+  try {
+    const userId = req.user?.id || req.userId;
+    console.log(`🔄 detectVPNChange called for user: ${userId}`);
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { UserSession, User } = require('../models');
+    const newIp = getClientIp(req);
+    console.log(`   IP Address: ${newIp}`);
+
+    // Get the user's last active session
+    const activeSession = await UserSession.findOne({
+      where: { userId, isActive: true },
+      order: [['loginTime', 'DESC']],
+    });
+
+    if (!activeSession) {
+      console.log(`   ⚠️ No active session found for user ${userId}`);
+      return res.status(404).json({ success: false, message: 'No active session found' });
+    }
+
+    console.log(`   Active session found (ID: ${activeSession.id})`);
+    console.log(`   Previous IP: ${activeSession.ipAddress}, Current VPN Status: ${activeSession.isVPNDetected}`);
+
+    // Check if IP has changed
+    const ipChanged = newIp !== activeSession.ipAddress;
+
+    // ALWAYS check VPN status, even if IP hasn't changed (VPN might have been toggled)
+    const newLocation = await fetchLocationFromIp(newIp);
+    const vpnDetection = await detectVPNStatus(newIp);
+
+    console.log(`📍 VPN Status Check for user ${userId}:`);
+    console.log(`   IP: ${newIp}`);
+    console.log(`   VPN Detected: ${vpnDetection.isVPN}`);
+    console.log(`   VPN Provider: ${vpnDetection.provider || 'none'}`);
+    console.log(`   Previous VPN Status: ${activeSession.isVPNDetected}`);
+    console.log(`   Location: ${newLocation?.city}, ${newLocation?.country}`);
+
+    // Build update data
+    const updateData = {
+      ipAddress: newIp,
+      isVPNDetected: vpnDetection.isVPN,
+      vpnProvider: vpnDetection.provider,
+      vpnDetectionScore: vpnDetection.fraudScore,
+      location: newLocation, // Always update backward compat field
+    };
+
+    // Store appropriate location based on VPN status
+    if (vpnDetection.isVPN) {
+      updateData.vpnLocation = newLocation;
+      updateData.realLocation = null;
+      updateData.realIPConfirmedAt = null;
+    } else {
+      updateData.realLocation = newLocation;
+      updateData.realIPConfirmedAt = new Date();
+      updateData.vpnLocation = null;
+    }
+
+    // Add to detection history
+    const vpnDetectionHistory = activeSession.vpnDetectionHistory || [];
+    vpnDetectionHistory.push({
+      timestamp: new Date(),
+      ip: newIp,
+      isVPN: vpnDetection.isVPN,
+      provider: vpnDetection.provider,
+      method: 'vpn_change_detection',
+      fraudScore: vpnDetection.fraudScore,
+    });
+    updateData.vpnDetectionHistory = vpnDetectionHistory;
+
+    await UserSession.update(updateData, { where: { id: activeSession.id } });
+
+    // Also update user's last location
+    const user = await User.findByPk(userId);
+    const userUpdateData = {
+      lastIPAddress: newIp,
+      lastISP: newLocation.isp || 'Unknown',
+    };
+
+    if (vpnDetection.isVPN) {
+      userUpdateData.lastVPNLocation = {
+        ...newLocation,
+        detectedAt: new Date(),
+        provider: vpnDetection.provider,
+      };
+      userUpdateData.isVPNCurrentlyDetected = true;
+    } else {
+      userUpdateData.lastActualLocation = {
+        ...newLocation,
+        confirmedAt: new Date(),
+      };
+      userUpdateData.isVPNCurrentlyDetected = false;
+    }
+
+    // Add to location history
+    const locationHistory = user.locationHistory || [];
+    locationHistory.push({
+      type: vpnDetection.isVPN ? 'vpn' : 'actual',
+      location: newLocation,
+      ip: newIp,
+      isp: newLocation.isp,
+      timestamp: new Date(),
+      provider: vpnDetection.provider,
+    });
+    userUpdateData.locationHistory = locationHistory.slice(-50);
+
+    await User.update(userUpdateData, { where: { id: userId } });
+
+    console.log(`✅ VPN/IP status checked for user ${userId}`);
+    console.log(`   IP: ${newIp} (changed: ${ipChanged})`);
+    console.log(`   VPN Status: ${vpnDetection.isVPN ? 'Active (' + vpnDetection.provider + ')' : 'Disabled'}`);
+
+    return res.json({
+      success: true,
+      message: 'VPN/IP status updated',
+      vpnStatusChanged: vpnDetection.isVPN !== activeSession.isVPNDetected || ipChanged,
+      ipChanged,
+      newStatus: {
+        isVPNDetected: vpnDetection.isVPN,
+        vpnProvider: vpnDetection.provider,
+        location: newLocation,
+      },
+    });
+  } catch (error) {
+    console.error('Error detecting VPN change:', error);
     next(error);
   }
 };

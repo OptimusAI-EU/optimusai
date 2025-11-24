@@ -48,10 +48,10 @@ exports.getAllUsers = async (req, res, next) => {
   }
 };
 
-// Get user by ID
+// Get user by ID with full details including location info
 exports.getUserById = async (req, res, next) => {
   try {
-    const { User, Subscription, Order } = getModels();
+    const { User, Subscription, Order, UserSession } = getModels();
     const user = await User.findByPk(req.params.id, {
       attributes: { exclude: ['password', 'oauth'] },
       include: [
@@ -64,7 +64,26 @@ exports.getUserById = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    res.json({ success: true, data: user });
+    // Get recent sessions for this user
+    const recentSessions = await UserSession.findAll({
+      where: { userId: req.params.id },
+      order: [['loginTime', 'DESC']],
+      limit: 10,
+    });
+
+    // Prepare response with location information
+    const userData = user.toJSON();
+    userData.recentSessions = recentSessions;
+    userData.locationInfo = {
+      lastVPNLocation: user.lastVPNLocation,
+      lastActualLocation: user.lastActualLocation,
+      lastIPAddress: user.lastIPAddress,
+      lastISP: user.lastISP,
+      isVPNCurrentlyDetected: user.isVPNCurrentlyDetected,
+      locationHistoryCount: user.locationHistory ? user.locationHistory.length : 0,
+    };
+
+    res.json({ success: true, data: userData });
   } catch (error) {
     next(error);
   }
@@ -91,6 +110,67 @@ exports.getUserSessions = async (req, res, next) => {
       data: {
         user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName },
         sessions,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get user location details
+exports.getUserLocationDetails = async (req, res, next) => {
+  try {
+    const { User } = getModels();
+    const { id } = req.params;
+
+    const user = await User.findByPk(id, {
+      attributes: [
+        'id',
+        'email',
+        'firstName',
+        'lastName',
+        'lastVPNLocation',
+        'lastActualLocation',
+        'lastIPAddress',
+        'lastISP',
+        'isVPNCurrentlyDetected',
+        'locationHistory',
+        'vpnDetectionEnabled',
+      ],
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const locationHistory = user.locationHistory || [];
+    const vpnHistory = locationHistory.filter((item) => item.type === 'vpn');
+    const actualHistory = locationHistory.filter((item) => item.type === 'actual');
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        },
+        currentStatus: {
+          isVPNActive: user.isVPNCurrentlyDetected,
+          lastIPAddress: user.lastIPAddress,
+          lastISP: user.lastISP,
+          vpnDetectionEnabled: user.vpnDetectionEnabled,
+        },
+        vpnLocation: user.lastVPNLocation,
+        actualLocation: user.lastActualLocation,
+        locationHistory: {
+          total: locationHistory.length,
+          vpnCount: vpnHistory.length,
+          actualCount: actualHistory.length,
+          lastUpdated: locationHistory.length > 0 ? locationHistory[0].timestamp : null,
+          recent: locationHistory.slice(0, 20), // Last 20 location changes
+        },
       },
     });
   } catch (error) {
@@ -424,6 +504,8 @@ exports.getAuditLog = async (req, res, next) => {
     const { UserSession } = getModels();
     const { limit = 100, offset = 0 } = req.query;
 
+    console.log(`📋 Fetching audit logs (limit: ${limit}, offset: ${offset})`);
+
     // Get session logs with location data
     const sessions = await UserSession.findAll({
       order: [['loginTime', 'DESC']],
@@ -437,28 +519,54 @@ exports.getAuditLog = async (req, res, next) => {
       ],
     });
 
+    console.log(`✅ Retrieved ${sessions.length} sessions`);
+    console.log(`First session sample:`, sessions[0] ? {
+      id: sessions[0].id,
+      isActive: sessions[0].isActive,
+      logoutTime: sessions[0].logoutTime,
+      isVPNDetected: sessions[0].isVPNDetected,
+    } : 'No sessions');
+
     const total = await UserSession.count();
 
     // Format the data for display
-    const logs = sessions.map((session) => ({
-      id: session.id,
-      userId: session.userId,
-      email: session.user?.email || 'Unknown',
-      userName: `${session.user?.firstName || ''} ${session.user?.lastName || ''}`.trim(),
-      action: session.logoutTime ? 'logout' : 'login',
-      ipAddress: session.ipAddress,
-      location: session.location ? {
-        country: session.location.country || 'Unknown',
-        city: session.location.city || 'Unknown',
-        latitude: session.location.latitude,
-        longitude: session.location.longitude,
-        isp: session.location.isp || 'Unknown',
-      } : null,
-      timestamp: session.logoutTime || session.loginTime,
-      loginTime: session.loginTime,
-      logoutTime: session.logoutTime,
-      status: 'success',
-    }));
+    const logs = sessions.map((session) => {
+      // Determine which location to use - prefer realLocation, fallback to vpnLocation, then location
+      let displayLocation = null;
+      if (session.realLocation) {
+        displayLocation = session.realLocation;
+      } else if (session.vpnLocation) {
+        displayLocation = session.vpnLocation;
+      } else if (session.location) {
+        displayLocation = session.location;
+      }
+
+      return {
+        id: session.id,
+        userId: session.userId,
+        email: session.user?.email || 'Unknown',
+        userName: `${session.user?.firstName || ''} ${session.user?.lastName || ''}`.trim(),
+        action: session.logoutTime ? 'logout' : 'login',
+        ipAddress: session.ipAddress,
+        isVPNDetected: session.isVPNDetected || false,
+        vpnProvider: session.vpnProvider,
+        isActive: session.isActive || false,
+        location: displayLocation ? {
+          country: displayLocation.country || 'Unknown',
+          city: displayLocation.city || 'Unknown',
+          latitude: displayLocation.latitude,
+          longitude: displayLocation.longitude,
+          isp: displayLocation.isp || 'Unknown',
+        } : null,
+        timestamp: session.logoutTime || session.loginTime,
+        loginTime: session.loginTime,
+        logoutTime: session.logoutTime,
+        sessionDuration: session.logoutTime ? Math.round((new Date(session.logoutTime) - new Date(session.loginTime)) / 1000 / 60) : null,
+        status: 'success',
+      };
+    });
+
+    console.log(`📤 Returning ${logs.length} formatted logs`);
 
     res.json({
       success: true,
@@ -466,6 +574,7 @@ exports.getAuditLog = async (req, res, next) => {
       pagination: { total, limit: parseInt(limit), offset: parseInt(offset) },
     });
   } catch (error) {
+    console.error('❌ Error in getAuditLog:', error);
     next(error);
   }
 };
@@ -474,10 +583,11 @@ exports.getAuditLog = async (req, res, next) => {
 
 exports.getDashboardStats = async (req, res, next) => {
   try {
-    const { User, Order, Subscription } = getModels();
+    const { User, Order, Subscription, UserSession } = getModels();
     // User stats
     const totalUsers = await User.count();
     const adminUsers = await User.count({ where: { role: 'admin' } });
+    const activeUsers = await UserSession.count({ where: { isActive: true } });
 
     // Order stats
     const totalOrders = await Order.count();
@@ -512,7 +622,7 @@ exports.getDashboardStats = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        users: { total: totalUsers, admins: adminUsers },
+        users: { total: totalUsers, admins: adminUsers, active: activeUsers },
         orders: { total: totalOrders, completed: completedOrders, pending: pendingOrders, revenue: parseFloat(totalRevenue) || 0 },
         subscriptions: { total: totalSubscriptions, active: activeSubscriptions, mrr: parseFloat(mrr), arr: parseFloat(arr) },
       },

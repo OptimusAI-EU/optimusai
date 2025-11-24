@@ -10,6 +10,7 @@ router.post('/register', authController.register);
 router.post('/login', authController.login);
 router.post('/refresh-token', authController.refreshToken);
 router.post('/logout', verifyToken, authController.logout);
+router.post('/detect-vpn-change', verifyToken, authController.detectVPNChange);
 
 // Email Verification
 router.get('/verify-email', authController.verifyEmail);

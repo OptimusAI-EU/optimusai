@@ -53,10 +53,15 @@ module.exports = (sequelize) => {
       paymentStatus: {
         type: DataTypes.ENUM('pending', 'completed', 'failed', 'refunded'),
         defaultValue: 'pending',
+        comment: 'pending: In cart or awaiting payment, completed: Payment successful, order moves to awaiting_shipping',
       },
       orderStatus: {
-        type: DataTypes.ENUM('pending', 'processing', 'shipped', 'delivered', 'cancelled'),
-        defaultValue: 'pending',
+        type: DataTypes.ENUM('cart', 'awaiting_shipping', 'shipped', 'delivered', 'cancelled'),
+        defaultValue: 'cart',
+      },
+      productType: {
+        type: DataTypes.ENUM('robot', 'odin_subscription'),
+        defaultValue: 'robot',
       },
       stripePaymentIntentId: {
         type: DataTypes.STRING,

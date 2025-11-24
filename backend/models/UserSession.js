@@ -48,6 +48,52 @@ module.exports = (sequelize) => {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
       },
+      // VPN Detection Fields
+      isVPNDetected: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      vpnProvider: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        // 'ExpressVPN', 'NordVPN', 'ProtonVPN', etc.
+      },
+      vpnDetectionScore: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        // 0-100 fraud score
+      },
+      vpnLocation: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        // { country, city, latitude, longitude, isp } - location from VPN IP
+      },
+      // Real Location (when VPN is disabled)
+      realLocation: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        // { country, city, latitude, longitude, isp, confirmed: true }
+      },
+      realIPConfirmedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      // Detection History
+      vpnDetectionHistory: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        defaultValue: [],
+        // [{ timestamp, ip, isVPN, provider, method }]
+      },
+      // WebRTC/DNS Leak Info
+      webRTCLeakDetected: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      leakedIPs: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
     },
     {
       sequelize,
