@@ -31,10 +31,14 @@ const app = express();
     await connectDB();
     
     // Import and initialize models (this will set up all models with associations)
-    const { User, Subscription, Order, ContactForm, Product, UserSession, UserPreference } = require('./models');
+    const { User, Subscription, Order, ContactForm, Product, UserSession, UserPreference, Inventory } = require('./models');
+    
+    // Check if we need to create tables from scratch
+    const tables = await sequelize.getQueryInterface().showAllTables();
+    const shouldForce = tables.length === 0; // If no tables exist, force sync
     
     // Sync database
-    await sequelize.sync({ alter: false });
+    await sequelize.sync({ force: shouldForce, alter: !shouldForce });
     console.log('Database models synced successfully.');
   } catch (error) {
     console.error('Database initialization error:', error);

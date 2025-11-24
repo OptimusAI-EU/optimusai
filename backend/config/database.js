@@ -1,8 +1,9 @@
 const { Sequelize } = require('sequelize');
+const path = require('path');
 
 const sequelize = new Sequelize({
   dialect: 'sqlite',
-  storage: './database.sqlite',
+  storage: path.join(__dirname, '../database.sqlite'),
   logging: false,
   // Disable foreign key constraints to allow table modifications
   dialectOptions: {

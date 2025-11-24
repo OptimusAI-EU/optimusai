@@ -37,19 +37,27 @@ module.exports = (sequelize) => {
       },
       endDate: {
         type: DataTypes.DATE,
-        allowNull: false,
+        allowNull: true,
       },
       renewalDate: {
         type: DataTypes.DATE,
         allowNull: false,
+        comment: 'Exact date and time when subscription is due for renewal (same time as subscriptionDate + billing period)',
+      },
+      subscriptionDate: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
+        comment: 'Complete timestamp when subscription was created (used to calculate exact renewal time)',
       },
       autoRenew: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
+        comment: 'Only active if subscription status is Active or Awaiting Renewal',
       },
       status: {
-        type: DataTypes.ENUM('active', 'cancelled', 'expired', 'paused'),
-        defaultValue: 'active',
+        type: DataTypes.ENUM('cart', 'active', 'awaiting_renewal', 'cancelled'),
+        defaultValue: 'cart',
+        comment: 'cart: In cart/awaiting payment, active: Payment made/subscription active, awaiting_renewal: Renewal date passed, cancelled: Subscription cancelled',
       },
       features: {
         type: DataTypes.JSON,

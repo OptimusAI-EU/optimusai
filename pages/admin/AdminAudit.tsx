@@ -16,10 +16,14 @@ interface AuditLogEntry {
   userName: string;
   action: 'login' | 'logout';
   ipAddress: string;
+  isVPNDetected: boolean;
+  vpnProvider?: string;
+  isActive: boolean;
   location: Location | null;
   timestamp: string;
   loginTime: string;
   logoutTime: string | null;
+  sessionDuration: number | null;
   status: string;
 }
 
@@ -30,9 +34,16 @@ const AdminAudit: React.FC = () => {
   const [actionFilter, setActionFilter] = useState<'all' | 'login' | 'logout'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
   useEffect(() => {
     loadLogs();
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(() => {
+      loadLogs();
+      setLastRefresh(new Date());
+    }, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -43,10 +54,12 @@ const AdminAudit: React.FC = () => {
     try {
       setLoading(true);
       const response = await getAuditLog();
+      console.log('Audit logs loaded:', response.data);
       setLogs(response.data || []);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load audit logs');
+      const errorMsg = err instanceof Error ? err.message : 'Failed to load audit logs';
+      setError(errorMsg);
       console.error('Failed to load audit logs:', err);
     } finally {
       setLoading(false);
@@ -123,10 +136,29 @@ const AdminAudit: React.FC = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">Admin Audit Log</h2>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-gray-900">Admin Audit Log</h2>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={loadLogs}
+              disabled={loading}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
+            >
+              {loading ? 'Refreshing...' : '🔄 Refresh'}
+            </button>
+            <span className="text-xs text-gray-500">
+              Last refreshed: {lastRefresh.toLocaleTimeString()}
+            </span>
+          </div>
+        </div>
 
         {/* Filters */}
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              ⚠️ {error}
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
@@ -159,10 +191,12 @@ const AdminAudit: React.FC = () => {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Timestamp</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Login Time</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Logout Time</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Duration</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">User</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Action</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">IP Address</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">VPN Status</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Location</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">ISP</th>
                 </tr>
@@ -172,7 +206,17 @@ const AdminAudit: React.FC = () => {
                   filteredLogs.map((log) => (
                     <tr key={log.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
-                        {formatDate(log.timestamp)}
+                        {formatDate(log.loginTime)}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
+                        {log.isActive ? (
+                          <span className="text-yellow-600 font-medium">Active</span>
+                        ) : (
+                          log.logoutTime ? formatDate(log.logoutTime) : <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
+                        {log.sessionDuration ? `${log.sessionDuration}m` : <span className="text-gray-400">—</span>}
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <div>
@@ -180,13 +224,17 @@ const AdminAudit: React.FC = () => {
                           <p className="text-xs text-gray-600">{log.userName}</p>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm">
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getActionColor(log.action)}`}>
-                          {getActionLabel(log.action)}
-                        </span>
-                      </td>
                       <td className="px-6 py-4 text-sm text-gray-600 font-mono text-xs">
                         {log.ipAddress || 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 text-sm whitespace-nowrap">
+                        {log.isVPNDetected ? (
+                          <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 w-fit">
+                            🔒 {log.vpnProvider || 'VPN'}
+                          </span>
+                        ) : (
+                          <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-semibold">✓ Direct</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">
                         {log.location ? (
@@ -207,7 +255,7 @@ const AdminAudit: React.FC = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-gray-600">
+                    <td colSpan={8} className="px-6 py-8 text-center text-gray-600">
                       No audit logs found.
                     </td>
                   </tr>

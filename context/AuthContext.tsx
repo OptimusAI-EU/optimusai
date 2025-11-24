@@ -1,6 +1,7 @@
-import React, { createContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { saveUser, updateLastLogin } from '../utils/userStorage';
 import { logAdminAction } from '../utils/auditLog';
+import { detectVPNChange } from '../utils/adminApi';
 
 export interface User {
   id: string;
@@ -78,8 +79,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     console.log('User logged in:', userWithBooleanAdmin, 'isAdmin:', userWithBooleanAdmin.isAdmin === true);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     if (user) {
+      // Call backend logout endpoint
+      try {
+        const token = localStorage.getItem('authToken');
+        const backendUrl = typeof (window as any).VITE_API_URL !== 'undefined' 
+          ? (window as any).VITE_API_URL 
+          : 'http://localhost:5000';
+        
+        const response = await fetch(`${backendUrl}/api/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (response.ok) {
+          console.log('✅ Backend logout successful');
+        } else {
+          console.warn('⚠️ Backend logout returned:', response.status);
+        }
+      } catch (error) {
+        console.error('Error calling backend logout:', error);
+        // Continue with client-side logout even if backend call fails
+      }
+
       // Log logout action
       logAdminAction({
         adminId: user.id,
@@ -91,6 +117,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     setUser(null);
     localStorage.removeItem('user');
+    localStorage.removeItem('authToken');
   }, [user]);
 
   const signInWithEmail = useCallback(async (email: string, password: string, isAdmin = false, isSignUp = false, firstName?: string, lastName?: string): Promise<User> => {
@@ -203,6 +230,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     signInWithGoogle,
     signInWithGithub,
   };
+
+  // Periodically check for VPN/IP changes every 60 seconds when user is logged in
+  useEffect(() => {
+    if (!user) return;
+
+    const checkVPNStatus = async () => {
+      try {
+        const response = await detectVPNChange();
+        if (response?.vpnStatusChanged) {
+          console.log('VPN status changed detected:', response.newStatus);
+        }
+      } catch (error) {
+        // Silent fail - don't interrupt user experience
+        console.debug('VPN detection check failed (normal if not authenticated)');
+      }
+    };
+
+    // Check immediately on login
+    checkVPNStatus();
+
+    // Then check every 60 seconds
+    const interval = setInterval(checkVPNStatus, 60000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

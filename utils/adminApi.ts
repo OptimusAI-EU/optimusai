@@ -189,3 +189,9 @@ export const getSubscriptionStats = async () => {
 export const getAuditLog = async () => {
   return makeRequest('/admin/audit-log');
 };
+
+// ============ VPN DETECTION ============
+
+export const detectVPNChange = async () => {
+  return makeRequest('/auth/detect-vpn-change', 'POST');
+};

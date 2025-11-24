@@ -115,6 +115,39 @@ module.exports = (sequelize) => {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
       },
+      // VPN & Location Tracking
+      lastVPNLocation: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        // { country, city, latitude, longitude, isp, ip, detectedAt, provider }
+      },
+      lastActualLocation: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        // { country, city, latitude, longitude, isp, ip, confirmedAt }
+      },
+      lastIPAddress: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      lastISP: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      locationHistory: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        defaultValue: [],
+        // [{ type: 'vpn'|'actual', location, ip, isp, timestamp, provider }]
+      },
+      vpnDetectionEnabled: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+      },
+      isVPNCurrentlyDetected: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
     },
     {
       sequelize,

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getAllUsers, updateUserRole, deleteUser } from '../../utils/adminApi';
 import { useAuth } from '../../context/AuthContext';
+import UserLocationModal from './UserLocationModal';
 
 interface User {
   id: number;
@@ -10,6 +11,11 @@ interface User {
   role: 'user' | 'admin' | 'moderator';
   createdAt: string;
   updatedAt: string;
+  lastIPAddress?: string;
+  lastISP?: string;
+  isVPNCurrentlyDetected?: boolean;
+  lastVPNLocation?: any;
+  lastActualLocation?: any;
 }
 
 interface UserSession {
@@ -27,6 +33,10 @@ interface UserSession {
   loginTime: string;
   logoutTime: string | null;
   isActive: boolean;
+  isVPNDetected?: boolean;
+  vpnProvider?: string;
+  vpnLocation?: any;
+  realLocation?: any;
 }
 
 interface ConfirmModal {
@@ -40,6 +50,13 @@ interface SessionsModal {
   user: User | null;
   sessions: UserSession[];
   loading: boolean;
+}
+
+interface UserLocation {
+  isOpen: boolean;
+  user: User | null;
+  loading: boolean;
+  locationData?: any;
 }
 
 const AdminUsers: React.FC = () => {
@@ -58,6 +75,11 @@ const AdminUsers: React.FC = () => {
     isOpen: false,
     user: null,
     sessions: [],
+    loading: false,
+  });
+  const [locationModal, setLocationModal] = useState<UserLocation>({
+    isOpen: false,
+    user: null,
     loading: false,
   });
   const [loading, setLoading] = useState(true);
@@ -165,6 +187,25 @@ const AdminUsers: React.FC = () => {
     }
   };
 
+  const handleViewLocationDetails = async (user: User) => {
+    setLocationModal({ isOpen: true, user, loading: true });
+    
+    try {
+      const token = localStorage.getItem('authToken');
+      const response = await fetch(`http://localhost:5000/api/admin/users/${user.id}/location`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      
+      if (!response.ok) throw new Error('Failed to fetch location data');
+      
+      const data = await response.json();
+      setLocationModal({ isOpen: true, user, loading: false, locationData: data.data });
+    } catch (err) {
+      console.error('Failed to load location data:', err);
+      setLocationModal({ isOpen: true, user, loading: false });
+    }
+  };
+
   const confirmAction = async () => {
     if (!confirmModal.user || !confirmModal.action) return;
 
@@ -259,6 +300,9 @@ const AdminUsers: React.FC = () => {
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900 cursor-pointer hover:bg-gray-100">
                   <span onClick={() => setSortBy('email')}>Email</span>
                 </th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">IP Address</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">ISP</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">VPN Status</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Role</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Created</th>
                 <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Actions</th>
@@ -280,6 +324,17 @@ const AdminUsers: React.FC = () => {
                       {user.firstName} {user.lastName}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">{user.email}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600 font-mono">{user.lastIPAddress || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{user.lastISP || '—'}</td>
+                    <td className="px-6 py-4 text-sm">
+                      <span className={`inline-block px-2 py-1 rounded text-xs font-semibold ${
+                        user.isVPNCurrentlyDetected 
+                          ? 'bg-yellow-100 text-yellow-700' 
+                          : 'bg-green-100 text-green-700'
+                      }`}>
+                        {user.isVPNCurrentlyDetected ? '🔒 VPN Active' : '✓ Direct'}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 text-sm">
                       <span
                         className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
@@ -297,10 +352,17 @@ const AdminUsers: React.FC = () => {
                     <td className="px-6 py-4 text-sm">
                       <div className="flex gap-2">
                         <button
+                          onClick={() => handleViewLocationDetails(user)}
+                          className="text-purple-600 hover:text-purple-700 font-semibold"
+                          title="View Location Details"
+                        >
+                          📍
+                        </button>
+                        <button
                           onClick={() => handleViewSessions(user)}
                           className="text-blue-600 hover:text-blue-700 font-semibold"
                         >
-                          View Sessions
+                          Sessions
                         </button>
                         {user.role !== 'admin' ? (
                           <button
@@ -329,7 +391,7 @@ const AdminUsers: React.FC = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                     No users found.
                   </td>
                 </tr>
@@ -447,6 +509,15 @@ const AdminUsers: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Location Details Modal */}
+      <UserLocationModal
+        isOpen={locationModal.isOpen}
+        user={locationModal.user}
+        loading={locationModal.loading}
+        locationData={locationModal.locationData}
+        onClose={() => setLocationModal({ isOpen: false, user: null, loading: false })}
+      />
     </div>
   );
 };

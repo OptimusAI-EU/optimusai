@@ -96,7 +96,7 @@ const AdminOverview: React.FC = () => {
             />
             <StatCard
               title="Active Users"
-              value={stats.activeUsers || 0}
+              value={stats.users?.active || 0}
               icon="🟢"
               subtitle="Currently active"
             />

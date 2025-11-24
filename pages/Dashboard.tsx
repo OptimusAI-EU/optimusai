@@ -6,11 +6,12 @@ import AdminUsers from './admin/AdminUsers';
 import AdminOrders from './admin/AdminOrders';
 import AdminAudit from './admin/AdminAudit';
 import AdminSubscriptions from './admin/AdminSubscriptions';
+import AdminInventory from './admin/AdminInventory';
 import { seedTestData, clearTestData } from '../utils/seedData';
 
 const Dashboard: React.FC = () => {
   const { isLoggedIn, isAdmin } = useAuth();
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'orders' | 'subscriptions' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'orders' | 'subscriptions' | 'inventory' | 'audit'>('overview');
 
   if (!isLoggedIn || !isAdmin) {
     return (
@@ -113,6 +114,16 @@ const Dashboard: React.FC = () => {
                 💳 Subscriptions
               </button>
               <button
+                onClick={() => setActiveTab('inventory')}
+                className={`flex-1 px-6 py-4 text-center font-semibold transition-colors cursor-pointer ${
+                  activeTab === 'inventory'
+                    ? 'border-b-2 border-red-600 text-red-600 bg-red-50'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                📦 Inventory
+              </button>
+              <button
                 onClick={() => setActiveTab('audit')}
                 className={`flex-1 px-6 py-4 text-center font-semibold transition-colors cursor-pointer ${
                   activeTab === 'audit'
@@ -131,6 +142,7 @@ const Dashboard: React.FC = () => {
             {activeTab === 'users' && <AdminUsers />}
             {activeTab === 'orders' && <AdminOrders />}
             {activeTab === 'subscriptions' && <AdminSubscriptions />}
+            {activeTab === 'inventory' && <AdminInventory />}
             {activeTab === 'audit' && <AdminAudit />}
           </div>
         </div>
