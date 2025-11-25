@@ -12,9 +12,19 @@ if (!rootElement) {
 }
 
 const root = ReactDOM.createRoot(rootElement);
+
+// Determine basename based on current location
+const getBasename = () => {
+  if (typeof window !== 'undefined') {
+    // If on GitHub Pages, use /optimusai, otherwise use /
+    return window.location.hostname.includes('github.io') ? '/optimusai' : '/';
+  }
+  return '/';
+};
+
 root.render(
   <React.StrictMode>
-    <BrowserRouter basename={import.meta.env.MODE === 'production' ? '/optimusai' : '/'}>
+    <BrowserRouter basename={getBasename()}>
       <AuthProvider>
         <App />
       </AuthProvider>
