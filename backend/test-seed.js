@@ -1,52 +1,58 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const { sequelize, connectDB } = require('./config/database');
 const bcrypt = require('bcryptjs');
 
-const dbPath = path.join(__dirname, '..', 'database.sqlite');
-const db = new sqlite3.Database(dbPath);
+const seedAdminUser = async () => {
+  try {
+    // Connect to database
+    await connectDB();
+    
+    console.log('✓ Database connected');
 
-db.serialize(() => {
-  // Create Users table if it doesn't exist
-  db.run(`
-    CREATE TABLE IF NOT EXISTS Users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      firstName TEXT,
-      lastName TEXT,
-      role TEXT DEFAULT 'user',
-      isEmailVerified INTEGER DEFAULT 0,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `, (err) => {
-    if (err) {
-      console.error('Error creating Users table:', err);
-      return;
-    }
-    console.log('✓ Users table ready');
+    // Get User model
+    const { User } = require('./models');
 
-    // Hash password and insert admin user
-    const password = 'Test1234!';
-    bcrypt.hash(password, 10, (err, hash) => {
-      if (err) {
-        console.error('Error hashing password:', err);
-        return;
-      }
-
-      db.run(`
-        INSERT OR IGNORE INTO Users (email, password, firstName, lastName, role, isEmailVerified)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `, ['optimusrobots@proton.me', hash, 'Optimus', 'Admin', 'admin', 1], function(err) {
-        if (err) {
-          console.error('Error inserting admin user:', err);
-        } else {
-          console.log('✓ Admin user created/verified');
-          console.log('  Email: optimusrobots@proton.me');
-          console.log('  Password: Test1234!');
-        }
-        db.close();
-      });
+    // Check if admin already exists
+    const adminExists = await User.findOne({
+      where: { email: 'optimusrobots@proton.me' }
     });
-  });
-});
+
+    if (adminExists) {
+      console.log('✓ Admin user already exists: optimusrobots@proton.me');
+      console.log('✓ Password: Test1234!');
+      // Update password to ensure it's correct
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash('Test1234!', salt);
+      await adminExists.update({ password: hashedPassword });
+      console.log('✓ Password updated');
+      await sequelize.close();
+      process.exit(0);
+    }
+
+    // Create admin user (beforeCreate hook will hash password)
+    const admin = await User.create({
+      email: 'optimusrobots@proton.me',
+      password: 'Test1234!',
+      firstName: 'Optimus',
+      lastName: 'Admin',
+      role: 'admin',
+      isEmailVerified: true,
+    });
+
+    console.log('✓ Admin user created successfully!');
+    console.log('✓ Email: optimusrobots@proton.me');
+    console.log('✓ Password: Test1234!');
+    console.log('✓ Role: admin');
+    
+    await sequelize.close();
+    process.exit(0);
+  } catch (error) {
+    console.error('✗ Error seeding admin user:', error.message);
+    console.error(error);
+    try {
+      await sequelize.close();
+    } catch (e) {}
+    process.exit(1);
+  }
+};
+
+seedAdminUser();
