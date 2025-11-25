@@ -33,13 +33,24 @@ const app = express();
     // Import and initialize models (this will set up all models with associations)
     const { User, Subscription, Order, ContactForm, Product, UserSession, UserPreference, Inventory } = require('./models');
     
-    // Check if we need to create tables from scratch
-    const tables = await sequelize.getQueryInterface().showAllTables();
-    const shouldForce = tables.length === 0; // If no tables exist, force sync
-    
-    // Sync database
-    await sequelize.sync({ force: shouldForce, alter: !shouldForce });
-    console.log('Database models synced successfully.');
+    // Sync database without forcing (preserve existing data and foreign keys)
+    try {
+      await sequelize.sync({ force: false, alter: false });
+      console.log('Database models synced successfully.');
+    } catch (syncError) {
+      // If sync fails due to constraints, try creating tables that don't exist
+      console.log('Schema sync had issues, attempting to create missing tables...');
+      const tables = await sequelize.getQueryInterface().showAllTables();
+      
+      if (tables.length === 0) {
+        // No tables exist, create them from scratch
+        await sequelize.sync({ force: true });
+        console.log('Database tables created successfully.');
+      } else {
+        // Tables exist but have constraint issues, skip force sync
+        console.log('Database tables already exist, skipping force sync.');
+      }
+    }
   } catch (error) {
     console.error('Database initialization error:', error);
     process.exit(1);
